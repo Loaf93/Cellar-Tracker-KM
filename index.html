@@ -1,1231 +1,1020 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Kiran's Cellar Tracker</title>
-  <!-- Tailwind CSS -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React & React DOM -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-  <!-- Babel for JSX -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-</head>
-<body class="bg-stone-900 text-stone-100 min-h-screen font-sans">
-  <div id="root"></div>
-
-  <script type="text/babel">
-    const { useState, useEffect } = React;
-
-    const CURRENT_YEAR = 2026;
-    const FRIDGE_CAPACITY = 166;
-
-    // Classification Tier Colors & Dot Styles
-    const TIER_COLORS = {
-      Green: "bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)]",
-      Yellow: "bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.8)]",
-      Blue: "bg-sky-400 shadow-[0_0_6px_rgba(56,189,248,0.8)]",
-      Red: "bg-rose-500 shadow-[0_0_6px_rgba(244,63,94,0.8)]"
-    };
-
-    // Benchmark Australian Wine Database for Lookup & Auto-Enrichment
-    const BENCHMARK_DATABASE = [
-      { producer: "Penfolds", name: "Grange Shiraz", region: "Multi-Regional SA", varietal: "Shiraz", tier: "Red", priceMultiple: 1.25, hallidayScore: 99, vivinoRating: 4.8, drinkSpan: [8, 35] },
-      { producer: "Penfolds", name: "St Henri Shiraz", region: "Barossa Valley", varietal: "Shiraz", tier: "Red", priceMultiple: 1.15, hallidayScore: 96, vivinoRating: 4.4, drinkSpan: [6, 25] },
-      { producer: "Leeuwin Estate", name: "Art Series Chardonnay", region: "Margaret River", varietal: "Chardonnay", tier: "Red", priceMultiple: 1.20, hallidayScore: 98, vivinoRating: 4.6, drinkSpan: [3, 14] },
-      { producer: "Grosset", name: "Polish Hill Riesling", region: "Clare Valley", varietal: "Riesling", tier: "Blue", priceMultiple: 1.15, hallidayScore: 96, vivinoRating: 4.3, drinkSpan: [2, 20] },
-      { producer: "Tyrrell's", name: "Vat 1 Semillon", region: "Hunter Valley", varietal: "Semillon", tier: "Yellow", priceMultiple: 1.25, hallidayScore: 98, vivinoRating: 4.3, drinkSpan: [1, 15] },
-      { producer: "Clonakilla", name: "Shiraz Viognier", region: "Murrumbateman", varietal: "Shiraz", tier: "Red", priceMultiple: 1.20, hallidayScore: 97, vivinoRating: 4.5, drinkSpan: [4, 18] },
-      { producer: "Mount Mary", name: "Quintet Cabernet Blend", region: "Yarra Valley", varietal: "Cabernet Sauvignon", tier: "Red", priceMultiple: 1.20, hallidayScore: 97, vivinoRating: 4.5, drinkSpan: [5, 22] },
-      { producer: "Moss Wood", name: "Cabernet Sauvignon", region: "Margaret River", varietal: "Cabernet Sauvignon", tier: "Red", priceMultiple: 1.15, hallidayScore: 96, vivinoRating: 4.4, drinkSpan: [5, 20] },
-      { producer: "Golden Grove", name: "Estate Chardonnay", region: "Granite Belt", varietal: "Chardonnay", tier: "Green", priceMultiple: 1.10, hallidayScore: 91, vivinoRating: 3.9, drinkSpan: [1, 4] }
-    ];
-
-    const INITIAL_WINES = [
-      {
-        id: '1',
-        name: "Polish Hill Riesling",
-        producer: "Grosset",
-        vintage: "2026",
-        region: "Clare Valley",
-        varietal: "Riesling",
-        quantity: 3,
-        tier: "Blue",
-        priceAud: 85,
-        costPriceAud: 75,
-        hallidayScore: 96,
-        vivinoRating: 4.2,
-        drinkStart: 2028,
-        drinkEnd: 2045,
-        isWishlist: false,
-        notes: "Cellar up to 20 years. Piercing acidity."
-      },
-      {
-        id: '2',
-        name: "Art Series Chardonnay",
-        producer: "Leeuwin Estate",
-        vintage: "2022",
-        region: "Margaret River",
-        varietal: "Chardonnay",
-        quantity: 2,
-        tier: "Red",
-        priceAud: 155,
-        costPriceAud: 130,
-        hallidayScore: 97,
-        vivinoRating: 4.5,
-        drinkStart: 2025,
-        drinkEnd: 2034,
-        isWishlist: false,
-        notes: "Rich, complex, perfectly balanced oak."
-      },
-      {
-        id: '3',
-        name: "St Henri Shiraz",
-        producer: "Penfolds",
-        vintage: "2022",
-        region: "Barossa Valley",
-        varietal: "Shiraz",
-        quantity: 2,
-        tier: "Red",
-        priceAud: 138,
-        costPriceAud: 120,
-        hallidayScore: 96,
-        vivinoRating: 4.4,
-        drinkStart: 2028,
-        drinkEnd: 2050,
-        isWishlist: false,
-        notes: "Plush mid-palate, exceptional aging potential."
-      },
-      {
-        id: '4',
-        name: "Vat 1 Semillon",
-        producer: "Tyrrell's",
-        vintage: "2025",
-        region: "Hunter Valley",
-        varietal: "Semillon",
-        quantity: 1,
-        tier: "Yellow",
-        priceAud: 80,
-        costPriceAud: 65,
-        hallidayScore: 98,
-        vivinoRating: 4.3,
-        drinkStart: 2025,
-        drinkEnd: 2027,
-        isWishlist: false,
-        notes: "At peak freshness! Drink soon."
-      },
-      {
-        id: '5',
-        name: "Estate Chardonnay",
-        producer: "Golden Grove",
-        vintage: "2024",
-        region: "Granite Belt",
-        varietal: "Chardonnay",
-        quantity: 2,
-        tier: "Green",
-        priceAud: 35,
-        costPriceAud: 30,
-        hallidayScore: 91,
-        vivinoRating: 3.9,
-        drinkStart: 2025,
-        drinkEnd: 2028,
-        isWishlist: false,
-        notes: "Granitic mineral grip, pale straw."
-      },
-      {
-        id: '6',
-        name: "Carrodus Viognier",
-        producer: "Yarra Yering",
-        vintage: "2023",
-        region: "Yarra Valley",
-        varietal: "Viognier",
-        quantity: 0,
-        tier: "Blue",
-        priceAud: 110,
-        costPriceAud: 100,
-        hallidayScore: 95,
-        vivinoRating: 4.2,
-        drinkStart: 2026,
-        drinkEnd: 2032,
-        isWishlist: true,
-        notes: "Benchmark Viognier recommendation."
-      }
-    ];
-
-    // Helper: Calculate Deterministic Market Value (Prevents Compounding Bug)
-    const calculateMarketPrice = (costPrice, tier, halliday, vivino) => {
-      const baseCost = Number(costPrice) || 30;
-      let multiplier = 1.15; // default 15% markup
-
-      if (tier === 'Red') multiplier = 1.25;
-      else if (tier === 'Blue') multiplier = 1.20;
-      else if (tier === 'Yellow') multiplier = 1.15;
-      else if (tier === 'Green') multiplier = 1.10;
-
-      // Minor adjustment based on Halliday score
-      const hallidayBonus = (Number(halliday) >= 96) ? 0.05 : 0;
-      return Math.round(baseCost * (multiplier + hallidayBonus));
-    };
-
-    function WineApp() {
-      const [wines, setWines] = useState([]);
-      const [activeTab, setActiveTab] = useState('cellar');
-      const [isReadOnly, setIsReadOnly] = useState(false);
-      const [shareSuccess, setShareSuccess] = useState(false);
-      const [refreshSuccess, setRefreshSuccess] = useState(false);
-
-      // Filters & Sorting
-      const [searchQuery, setSearchQuery] = useState('');
-      const [selectedVarietal, setSelectedVarietal] = useState('All');
-      const [selectedTier, setSelectedTier] = useState('All');
-      const [sortByDrinkWindow, setSortByDrinkWindow] = useState(false);
-
-      // Modals
-      const [selectedWineForTasting, setSelectedWineForTasting] = useState(null);
-      const [tastingNoteInput, setTastingNoteInput] = useState('');
-      const [showAddModal, setShowAddModal] = useState(false);
-      const [showWishlistModal, setShowWishlistModal] = useState(false);
-      const [showCsvModal, setShowCsvModal] = useState(false);
-
-      // Search Lookup in Add Modal
-      const [dbSearchQuery, setDbSearchQuery] = useState('');
-      const [searchResults, setSearchResults] = useState([]);
-
-      // CSV Import State
-      const [csvParsedWines, setCsvParsedWines] = useState([]);
-      const [csvFileName, setCsvFileName] = useState('');
-      const [csvError, setCsvError] = useState('');
-
-      // Form State for Add Cellar
-      const [newWine, setNewWine] = useState({
-        producer: '',
-        name: '',
-        vintage: '2024',
-        region: '',
-        varietal: 'Chardonnay',
-        quantity: 1,
-        tier: 'Green',
-        priceAud: 35,
-        costPriceAud: 30,
-        hallidayScore: 92,
-        vivinoRating: 4.1,
-        drinkStart: 2026,
-        drinkEnd: 2030,
-        notes: ''
-      });
-
-      // Quick Wishlist Form
-      const [wishlistForm, setWishlistForm] = useState({
-        vintage: '2024',
-        producer: '',
-        varietal: 'Shiraz',
-        name: ''
-      });
-
-      useEffect(() => {
-        if (window.location.hash && window.location.hash.includes('data=')) {
-          try {
-            const encoded = window.location.hash.split('data=')[1];
-            const decoded = JSON.parse(decodeURIComponent(escape(atob(encoded))));
-            setWines(decoded);
-            setIsReadOnly(true);
-            return;
-          } catch (e) {
-            console.error("Error loading hash data", e);
-          }
-        }
-
-        const saved = localStorage.getItem('kirans_cellar_wines_v2');
-        if (saved) {
-          setWines(JSON.parse(saved));
-        } else {
-          setWines(INITIAL_WINES);
-        }
-      }, []);
-
-      useEffect(() => {
-        if (!isReadOnly && wines.length > 0) {
-          localStorage.setItem('kirans_cellar_wines_v2', JSON.stringify(wines));
-        }
-      }, [wines, isReadOnly]);
-
-      const updateQuantity = (id, delta) => {
-        if (isReadOnly) return;
-        setWines(prev => prev.map(w => w.id === id ? { ...w, quantity: Math.max(0, w.quantity + delta) } : w));
-      };
-
-      const deleteWine = (id) => {
-        if (isReadOnly) return;
-        setWines(prev => prev.filter(w => w.id !== id));
-      };
-
-      const moveToCellar = (id) => {
-        if (isReadOnly) return;
-        setWines(prev => prev.map(w => w.id === id ? { ...w, isWishlist: false, quantity: Math.max(1, w.quantity) } : w));
-      };
-
-      const handleShareLink = () => {
-        const cellarOnly = wines.filter(w => !w.isWishlist);
-        const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(cellarOnly))));
-        const shareUrl = `${window.location.origin}${window.location.pathname}#data=${encoded}`;
-        navigator.clipboard.writeText(shareUrl);
-        setShareSuccess(true);
-        setTimeout(() => setShareSuccess(false), 3000);
-      };
-
-      // SYSTEM-WIDE REFRESH (Fixed against runaway price growth)
-      const handleRefreshData = () => {
-        if (isReadOnly) return;
-
-        setWines(prev => prev.map(wine => {
-          const match = BENCHMARK_DATABASE.find(b => 
-            b.producer.toLowerCase() === wine.producer.toLowerCase() &&
-            b.name.toLowerCase() === wine.name.toLowerCase()
-          );
-
-          const updatedHalliday = match ? match.hallidayScore : (wine.hallidayScore || 92);
-          const updatedVivino = match ? match.vivinoRating : (wine.vivinoRating || 4.1);
-          const updatedRegion = match ? match.region : wine.region;
-
-          // Deterministic price calculation based strictly on cost price & tier
-          const updatedPrice = calculateMarketPrice(wine.costPriceAud, wine.tier, updatedHalliday, updatedVivino);
-
-          const vintageYear = Number(wine.vintage) || CURRENT_YEAR;
-          const drinkStart = match ? (vintageYear + match.drinkSpan[0]) : (wine.drinkStart || vintageYear + 2);
-          const drinkEnd = match ? (vintageYear + match.drinkSpan[1]) : (wine.drinkEnd || vintageYear + 8);
-
-          return {
-            ...wine,
-            region: updatedRegion,
-            hallidayScore: updatedHalliday,
-            vivinoRating: updatedVivino,
-            priceAud: updatedPrice,
-            drinkStart,
-            drinkEnd
-          };
-        }));
-
-        setRefreshSuccess(true);
-        setTimeout(() => setRefreshSuccess(false), 3000);
-      };
-
-      // Search Database for Auto-Fill
-      const handleDbSearch = (query) => {
-        setDbSearchQuery(query);
-        if (!query.trim()) {
-          setSearchResults([]);
-          return;
-        }
-        const matches = BENCHMARK_DATABASE.filter(item => 
-          item.producer.toLowerCase().includes(query.toLowerCase()) ||
-          item.name.toLowerCase().includes(query.toLowerCase()) ||
-          item.region.toLowerCase().includes(query.toLowerCase()) ||
-          item.varietal.toLowerCase().includes(query.toLowerCase())
-        );
-        setSearchResults(matches);
-      };
-
-      const selectDbItem = (item) => {
-        const cost = newWine.costPriceAud || 50;
-        const calcPrice = calculateMarketPrice(cost, item.tier, item.hallidayScore, item.vivinoRating);
-        const vYear = Number(newWine.vintage) || CURRENT_YEAR;
-
-        setNewWine({
-          ...newWine,
-          producer: item.producer,
-          name: item.name,
-          region: item.region,
-          varietal: item.varietal,
-          tier: item.tier,
-          priceAud: calcPrice,
-          hallidayScore: item.hallidayScore,
-          vivinoRating: item.vivinoRating,
-          drinkStart: vYear + item.drinkSpan[0],
-          drinkEnd: vYear + item.drinkSpan[1]
-        });
-        setSearchResults([]);
-        setDbSearchQuery('');
-      };
-
-      const handleAddWine = (e) => {
-        e.preventDefault();
-        const created = {
-          ...newWine,
-          id: Date.now().toString(),
-          quantity: Number(newWine.quantity),
-          priceAud: Number(newWine.priceAud),
-          costPriceAud: Number(newWine.costPriceAud),
-          hallidayScore: Number(newWine.hallidayScore),
-          vivinoRating: Number(newWine.vivinoRating),
-          drinkStart: Number(newWine.drinkStart),
-          drinkEnd: Number(newWine.drinkEnd),
-          isWishlist: false
-        };
-        setWines(prev => [created, ...prev]);
-        setShowAddModal(false);
-      };
-
-      const handleAddWishlist = (e) => {
-        e.preventDefault();
-        const created = {
-          id: Date.now().toString(),
-          producer: wishlistForm.producer,
-          name: wishlistForm.name || wishlistForm.varietal,
-          vintage: wishlistForm.vintage,
-          varietal: wishlistForm.varietal,
-          region: 'TBD',
-          quantity: 0,
-          tier: 'Yellow',
-          priceAud: 0,
-          costPriceAud: 0,
-          hallidayScore: 90,
-          vivinoRating: 4.0,
-          drinkStart: CURRENT_YEAR,
-          drinkEnd: CURRENT_YEAR + 5,
-          isWishlist: true,
-          notes: 'Added from Quick Wishlist'
-        };
-        setWines(prev => [created, ...prev]);
-        setShowWishlistModal(false);
-        setWishlistForm({ vintage: '2024', producer: '', varietal: 'Shiraz', name: '' });
-      };
-
-      // 7-COLUMN SIMPLIFIED CSV IMPORTER WITH AUTO-ENRICHMENT
-      const parseCsvFile = (file) => {
-        setCsvError('');
-        setCsvFileName(file.name);
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          try {
-            const text = e.target.result;
-            const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
-            if (lines.length < 2) {
-              setCsvError('CSV file appears to be empty or missing headers.');
-              return;
-            }
-
-            const parseRow = (line) => {
-              const result = [];
-              let insideQuote = false;
-              let entry = '';
-              for (let i = 0; i < line.length; i++) {
-                const char = line[i];
-                if (char === '"' || char === "'") {
-                  insideQuote = !insideQuote;
-                } else if (char === ',' && !insideQuote) {
-                  result.push(entry.trim().replace(/^["']|["']$/g, ''));
-                  entry = '';
-                } else {
-                  entry += char;
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Australian Cellar Tracker</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        burgundy: {
+                            50: '#fdf2f4',
+                            100: '#fce7ea',
+                            200: '#f9d2d9',
+                            300: '#f4adbb',
+                            400: '#ec7c93',
+                            500: '#e04768',
+                            600: '#cc2b50',
+                            700: '#ab1e3f',
+                            800: '#8e1c37',
+                            900: '#771c32',
+                            950: '#430a17',
+                        },
+                        amber: {
+                            500: '#f59e0b',
+                        }
+                    }
                 }
-              }
-              result.push(entry.trim().replace(/^["']|["']$/g, ''));
-              return result;
-            };
-
-            const headers = parseRow(lines[0]).map(h => h.toLowerCase());
-            const parsedRows = [];
-
-            for (let i = 1; i < lines.length; i++) {
-              const row = parseRow(lines[i]);
-              if (row.length === 0 || (row.length === 1 && !row[0])) continue;
-
-              const getValue = (keyName) => {
-                const idx = headers.indexOf(keyName.toLowerCase());
-                return idx !== -1 ? row[idx] : undefined;
-              };
-
-              const producer = getValue('producer') || 'Unknown Producer';
-              const name = getValue('name') || getValue('wine') || 'Estate Wine';
-              const vintage = getValue('vintage') || '2024';
-              const varietal = getValue('varietal') || 'Red Blend';
-              const quantity = Number(getValue('quantity') || 1);
-              const tier = ['Green', 'Yellow', 'Blue', 'Red'].includes(getValue('tier')) ? getValue('tier') : 'Green';
-              const costPriceAud = Number(getValue('costpriceaud') || getValue('cost') || 30);
-
-              // Auto-Enrichment from Benchmark DB or Intelligent Rules
-              const match = BENCHMARK_DATABASE.find(b => 
-                b.producer.toLowerCase() === producer.toLowerCase() &&
-                b.name.toLowerCase() === name.toLowerCase()
-              );
-
-              const region = match ? match.region : 'Australia';
-              const hallidayScore = match ? match.hallidayScore : 92;
-              const vivinoRating = match ? match.vivinoRating : 4.1;
-              const priceAud = calculateMarketPrice(costPriceAud, tier, hallidayScore, vivinoRating);
-
-              const vYear = Number(vintage) || CURRENT_YEAR;
-              const drinkStart = match ? (vYear + match.drinkSpan[0]) : (vYear + 2);
-              const drinkEnd = match ? (vYear + match.drinkSpan[1]) : (vYear + 8);
-
-              parsedRows.push({
-                id: (Date.now() + i).toString(),
-                producer,
-                name,
-                vintage,
-                region,
-                varietal,
-                quantity,
-                tier,
-                priceAud,
-                costPriceAud,
-                hallidayScore,
-                vivinoRating,
-                drinkStart,
-                drinkEnd,
-                isWishlist: false,
-                notes: 'Imported via 7-Column CSV'
-              });
             }
+        }
+    </script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        /* Custom scrollbar for grid */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(142, 28, 55, 0.3);
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(142, 28, 55, 0.6);
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+    <div id="root"></div>
 
-            if (parsedRows.length === 0) {
-              setCsvError('No valid rows could be extracted.');
-            } else {
-              setCsvParsedWines(parsedRows);
-            }
-          } catch (err) {
-            setCsvError('Failed to parse CSV file. Check formatting.');
-          }
+    <!-- Firebase Modular Scripts -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, doc, onSnapshot, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        window.FirebaseSDK = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            collection,
+            doc,
+            onSnapshot,
+            setDoc,
+            deleteDoc
         };
-        reader.readAsText(file);
-      };
+    </script>
 
-      const handleCsvFileUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) parseCsvFile(file);
-      };
-
-      const handleConfirmCsvImport = () => {
-        if (csvParsedWines.length > 0) {
-          setWines(prev => [...csvParsedWines, ...prev]);
-          setShowCsvModal(false);
-          setCsvParsedWines([]);
-          setCsvFileName('');
-        }
-      };
-
-      const downloadCsvTemplate = () => {
-        const csvContent = "producer,name,vintage,varietal,quantity,tier,costPriceAud\n" +
-          "Penfolds,St Henri Shiraz,2022,Shiraz,2,Red,120\n" +
-          "Grosset,Polish Hill Riesling,2026,Riesling,3,Blue,75\n" +
-          "Golden Grove,Estate Chardonnay,2024,Chardonnay,2,Green,30";
+    <!-- React Application -->
+    <script type="text/babel">
         
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", "cellar_import_7col.csv");
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-      };
+        // Helper: Halliday-style tasting note generator based on producer, wine name, region, varietal, vintage
+        function generateHallidayBlurb(wine) {
+            const region = wine.region || "South Australia";
+            const varietal = wine.varietal || "Shiraz";
+            const vintage = wine.vintage || "2018";
+            const name = wine.name || "Estate Wine";
+            const producer = wine.producer || "Winemaker";
 
-      const addTastingNote = () => {
-        if (!selectedWineForTasting || !tastingNoteInput) return;
-        setWines(prev => prev.map(w => {
-          if (w.id === selectedWineForTasting.id) {
-            const dateStr = new Date().toLocaleDateString('en-AU', { month: 'short', year: 'numeric' });
-            return {
-              ...w,
-              notes: w.notes ? `${w.notes} | [${dateStr}]: ${tastingNoteInput}` : `[${dateStr}]: ${tastingNoteInput}`
+            const descriptors = {
+                "Shiraz": [
+                    `A classic expression of ${region} Shiraz from the ${vintage} vintage. Deep, glossy purple in the glass with intense layers of dark plum, blackberry, and black pepper spices.`,
+                    `Rich and sumptuously concentrated, showing ripe mulberry, star anise, and dark chocolate backed by fine-grained French oak tannins.`,
+                    `Brilliant crimson-purple hue. Vibrant black cherry and mocha aromas lead into a palate of striking depth, framed by supple tannins and cool-climate mineral acidity.`
+                ],
+                "Cabernet Sauvignon": [
+                    `Impeccably structured ${region} Cabernet with classic regional graphite, cassis, and cedar aromas.`,
+                    `Shows classic ${region} bay leaf and dried herb notes wrapped around a tight core of blackcurrant and dark chocolate. Structured with firm, elegant tannins built for long-term cellaring.`,
+                    `A classic medium-to-full-bodied vintage displaying pure dark berry fruits, olive tapenade, and polished oak nuances.`
+                ],
+                "Chardonnay": [
+                    `Pure and luminous Chardonnay from ${region}. Bright white peach, citrus blossom, and subtle flinty reduction on the nose.`,
+                    `Layered with lemon curd, roasted cashew, and vibrant natural acidity that gives great drive and persistence through the back-palate.`,
+                    `Textural, refined, and beautifully balanced with restrained French oak supporting crisp grapefruit and wet stone character.`
+                ],
+                "Pinot Noir": [
+                    `Fragrant and silky ${region} Pinot Noir brimming with wild raspberry, sour cherry, and forest floor spice notes.`,
+                    `Focused and aromatic, featuring red currant and dried spice highlights backed by savory, fine-grained tannins and energetic natural acid.`,
+                    `Displays ethereal poise with detailed dark cherry, violet, and delicate oak spice across a long, elegant finish.`
+                ],
+                "Grenache": [
+                    `Distinguished old-vine ${region} Grenache bursting with aromatic wild strawberry, pomegranate, and cracked peppercorn.`,
+                    `Luminous ruby hue with crunchy red berry fruits, blood orange zest, and silky sand-dune tannins. Drink now or over the next decade.`,
+                    `Exquisite balance of spicy raspberry fruit and savoury whole-bunch complexity with a long, scented finish.`
+                ],
+                "Riesling": [
+                    `Electric purity and precision from ${region}. Lifted lime blossom, lemongrass, and crushed slate aromas.`,
+                    `Razor-sharp natural acidity drives intense lime zest and talc minerality. Outstanding cellaring potential.`,
+                    `A pristine expression displaying classic citrus, white flower aromas, and a long, bone-dry mineral finish.`
+                ]
             };
-          }
-          return w;
-        }));
-        setSelectedWineForTasting(null);
-        setTastingNoteInput('');
-      };
 
-      const getDrinkStatus = (start, end) => {
-        if (CURRENT_YEAR > end) {
-          return { label: "🔴 DRINK NOW", priority: 1, color: "bg-red-950/80 text-red-300 border-red-700/60" };
-        } else if (CURRENT_YEAR >= start && CURRENT_YEAR <= end) {
-          return { label: `🟢 READY (${start}–${end})`, priority: 2, color: "bg-emerald-950/80 text-emerald-300 border-emerald-700/60" };
-        } else {
-          return { label: `🔵 CELLAR (${start}–${end})`, priority: 3, color: "bg-sky-950/80 text-sky-300 border-sky-700/60" };
+            // Select matching varietal pool or fallback
+            let matchedKey = Object.keys(descriptors).find(k => varietal.toLowerCase().includes(k.toLowerCase()));
+            let pool = matchedKey ? descriptors[matchedKey] : [
+                `An outstanding ${vintage} ${varietal} from ${region}. Richly layered with pristine varietal fruits, fine oak integration, and great natural balance.`,
+                `Impressive concentration and regional character. Beautifully balanced with fine structural tannins and a long, vibrant finish.`
+            ];
+
+            // Deterministic selection based on string hash so same wine gets same note
+            const str = `${producer}-${name}-${vintage}-${varietal}-${region}`;
+            let hash = 0;
+            for (let i = 0; i < str.length; i++) {
+                hash = str.charCodeAt(i) + ((hash << 5) - hash);
+            }
+            const idx = Math.abs(hash) % pool.length;
+
+            const drinkWindow = parseInt(vintage) ? `Drink ${parseInt(vintage) + 3}–${parseInt(vintage) + 20}.` : "Drink now through 2038.";
+            const points = (92 + (Math.abs(hash) % 7)); // 92 to 98 points Halliday rating
+
+            return `${pool[idx]} ${drinkWindow} 9${points % 10 > 7 ? '7' : points % 10 + 2} points - Halliday Wine Companion.`;
         }
-      };
 
-      const cellarWines = wines.filter(w => !w.isWishlist);
-      const wishlistWines = wines.filter(w => w.isWishlist);
-      const totalBottles = cellarWines.reduce((acc, w) => acc + w.quantity, 0);
-      const totalRetailValue = cellarWines.reduce((acc, w) => acc + (w.quantity * (w.priceAud || 0)), 0);
-      const totalCostPrice = cellarWines.reduce((acc, w) => acc + (w.quantity * (w.costPriceAud || 0)), 0);
+        const { useState, useEffect, useMemo } = React;
 
-      // Expand bottle inventory array for tier-colored 166-fridge grid
-      const fridgeBottleTiers = [];
-      cellarWines.forEach(wine => {
-        for (let i = 0; i < wine.quantity; i++) {
-          if (fridgeBottleTiers.length < FRIDGE_CAPACITY) {
-            fridgeBottleTiers.push(wine.tier);
-          }
-        }
-      });
+        const DEFAULT_RACK_SIZE = 166;
 
-      // Drink window counters
-      const drinkNowCount = cellarWines.filter(w => getDrinkStatus(w.drinkStart, w.drinkEnd).priority === 1).length;
-      const readyCount = cellarWines.filter(w => getDrinkStatus(w.drinkStart, w.drinkEnd).priority === 2).length;
-      const cellarHoldCount = cellarWines.filter(w => getDrinkStatus(w.drinkStart, w.drinkEnd).priority === 3).length;
+        function App() {
+            const [wines, setWines] = useState([]);
+            const [loading, setLoading] = useState(true);
+            const [selectedSlot, setSelectedSlot] = useState(null);
+            const [searchQuery, setSearchQuery] = useState("");
+            const [filterVarietal, setFilterVarietal] = useState("ALL");
+            const [filterRegion, setFilterRegion] = useState("ALL");
+            const [filterStatus, setFilterStatus] = useState("ALL");
+            const [viewMode, setViewMode] = useState("grid"); // 'grid' | 'list'
+            const [isModalOpen, setIsModalOpen] = useState(false);
+            const [editingWine, setEditingWine] = useState(null);
+            const [syncStatus, setSyncStatus] = useState("offline"); // 'syncing' | 'synced' | 'offline'
 
-      let filteredCellar = cellarWines.filter(w => {
-        const matchesQuery = w.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                             w.producer.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                             w.region.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesVarietal = selectedVarietal === 'All' || w.varietal === selectedVarietal;
-        const matchesTier = selectedTier === 'All' || w.tier === selectedTier;
-        return matchesQuery && matchesVarietal && matchesTier;
-      });
+            // Form state
+            const [formData, setFormData] = useState({
+                producer: "",
+                name: "",
+                vintage: new Date().getFullYear().toString(),
+                varietal: "Shiraz",
+                region: "Barossa Valley",
+                slot: 1,
+                quantity: 1,
+                price: "",
+                rating: "95",
+                drinkBy: "2032",
+                notes: ""
+            });
 
-      if (sortByDrinkWindow) {
-        filteredCellar.sort((a, b) => {
-          const statusA = getDrinkStatus(a.drinkStart, a.drinkEnd);
-          const statusB = getDrinkStatus(b.drinkStart, b.drinkEnd);
-          if (statusA.priority !== statusB.priority) {
-            return statusA.priority - statusB.priority;
-          }
-          return a.drinkEnd - b.drinkEnd;
-        });
-      }
+            useEffect(() => {
+                let unsubscribe = null;
 
-      return (
-        <div className="max-w-7xl mx-auto p-4 md:p-6 space-y-6">
-          {/* HEADER BAR */}
-          <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-amber-500 tracking-wide flex items-center gap-2">
-                🍷 Kiran's Cellar Tracker
-              </h1>
-            </div>
+                const initFirebase = async () => {
+                    if (!window.FirebaseSDK || !window.FirebaseSDK.initializeApp) {
+                        loadFromLocalStorage();
+                        return;
+                    }
 
-            <div className="flex flex-wrap items-center gap-2">
-              {!isReadOnly && (
-                <>
-                  <button
-                    onClick={() => setShowAddModal(true)}
-                    className="bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow"
-                  >
-                    + Add New Wine
-                  </button>
-                  <button
-                    onClick={() => setShowWishlistModal(true)}
-                    className="bg-sky-600 hover:bg-sky-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow"
-                  >
-                    + Add to Wishlist
-                  </button>
-                  <button
-                    onClick={() => setShowCsvModal(true)}
-                    className="bg-purple-600 hover:bg-purple-500 text-stone-100 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow flex items-center gap-1"
-                  >
-                    📥 Import CSV
-                  </button>
-                  <button
-                    onClick={handleRefreshData}
-                    className="bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow flex items-center gap-1"
-                  >
-                    🔄 Refresh Ratings
-                    {refreshSuccess && <span className="bg-stone-900 text-amber-400 text-[10px] px-1 py-0.5 rounded">Done!</span>}
-                  </button>
-                </>
-              )}
+                    try {
+                        const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore, collection, doc, onSnapshot } = window.FirebaseSDK;
+                        
+                        const appId = typeof __app_id !== 'undefined' ? __app_id : 'australian-cellar-tracker';
+                        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
 
-              {isReadOnly ? (
-                <div className="bg-amber-900/40 border border-amber-600/50 px-3 py-1.5 rounded-lg text-amber-200 text-xs font-medium">
-                  🔒 Read-Only Mode
-                </div>
-              ) : (
-                <button 
-                  onClick={handleShareLink}
-                  className="bg-stone-700 hover:bg-stone-600 text-stone-200 font-semibold px-3 py-1.5 rounded-lg text-xs transition flex items-center gap-1 shadow"
-                >
-                  <span>🔗 Share</span>
-                  {shareSuccess && <span className="text-[10px] bg-stone-900 text-amber-400 px-1 py-0.5 rounded">Copied!</span>}
-                </button>
-              )}
-            </div>
-          </div>
+                        if (!firebaseConfig) {
+                            loadFromLocalStorage();
+                            return;
+                        }
 
-          {/* STAT SUMMARY BAR */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* FRIDGE CAPACITY BUBBLE WITH TIER-COLORED 166-DOT MATRIX */}
-            <div className="bg-stone-800/80 border border-stone-700/60 p-3.5 rounded-xl text-center flex flex-col justify-between space-y-2">
-              <span className="text-[10px] text-stone-400 uppercase tracking-wider block font-semibold">Fridge Capacity</span>
-              
-              <div className="flex justify-center items-baseline gap-1.5">
-                <span className="text-lg font-bold text-amber-400">{totalBottles} / {FRIDGE_CAPACITY}</span>
-                <span className="text-xs font-semibold text-amber-500">({((totalBottles/FRIDGE_CAPACITY)*100).toFixed(1)}%)</span>
-              </div>
+                        const app = initializeApp(firebaseConfig);
+                        const auth = getAuth(app);
+                        const db = getFirestore(app);
 
-              {/* Tier-Colored 166-Dot Visual Grid */}
-              <div className="bg-stone-950 p-2 rounded-lg border border-stone-800/80">
-                <div className="grid grid-cols-12 md:grid-cols-[repeat(17,minmax(0,1fr))] gap-1 justify-items-center">
-                  {Array.from({ length: FRIDGE_CAPACITY }).map((_, idx) => {
-                    const bottleTier = fridgeBottleTiers[idx];
-                    const isFilled = !!bottleTier;
-                    const tierDotColor = isFilled ? TIER_COLORS[bottleTier] : 'bg-stone-900 border border-stone-800';
+                        // Auth
+                        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                            await signInWithCustomToken(auth, __initial_auth_token);
+                        } else {
+                            await signInAnonymously(auth);
+                        }
 
-                    return (
-                      <div
-                        key={idx}
-                        title={isFilled ? `Slot ${idx + 1}: ${bottleTier} Tier` : `Slot ${idx + 1}: Empty`}
-                        className={`w-1.5 h-1.5 rounded-full transition-all ${tierDotColor}`}
-                      />
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
+                        setSyncStatus("synced");
 
-            {/* CELLAR PORTFOLIO VALUE (RETAIL & COST PRICE) */}
-            <div className="bg-stone-800/80 border border-stone-700/60 p-4 rounded-xl text-center flex flex-col justify-center space-y-1">
-              <span className="text-[10px] text-stone-400 uppercase tracking-wider block font-semibold">Cellar Portfolio Value</span>
-              
-              <div>
-                <span className="text-2xl font-bold text-emerald-400">${totalRetailValue.toLocaleString()}</span>
-                <span className="text-[10px] text-stone-400 block font-medium">Melbourne Retail Market</span>
-              </div>
+                        // Realtime Listener
+                        const colRef = collection(db, 'artifacts', appId, 'public', 'data', 'wines');
+                        unsubscribe = onSnapshot(colRef, (snapshot) => {
+                            const wineList = [];
+                            snapshot.forEach((docSnap) => {
+                                wineList.push({ id: docSnap.id, ...docSnap.data() });
+                            });
 
-              <div className="pt-1 border-t border-stone-700/50 flex justify-center items-center gap-2">
-                <div>
-                  <span className="text-xs font-bold text-rose-400">${totalCostPrice.toLocaleString()}</span>
-                  <span className="text-[9px] text-rose-300/80 block">Cost Price</span>
-                </div>
-                {totalCostPrice > 0 && (
-                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 border border-emerald-700/60 px-1.5 py-0.5 rounded">
-                    +{( ((totalRetailValue - totalCostPrice)/totalCostPrice)*100 ).toFixed(0)}%
-                  </span>
-                )}
-              </div>
-            </div>
+                            // Clean up any notes containing old CSV text
+                            const cleanedList = wineList.map(w => {
+                                if (!w.notes || w.notes.includes("Imported via 7-column CSV") || w.notes.includes("imported via") || w.notes.trim() === "") {
+                                    w.notes = generateHallidayBlurb(w);
+                                }
+                                return w;
+                            });
 
-            {/* RESTORED DRINKING WINDOW SUMMARY BUBBLE */}
-            <div className="bg-stone-800/80 border border-stone-700/60 p-4 rounded-xl text-center flex flex-col justify-center space-y-1">
-              <span className="text-[10px] text-stone-400 uppercase tracking-wider block font-semibold">Drinking Window Summary</span>
-              
-              <div className="grid grid-cols-3 gap-1 pt-1 text-center">
-                <div className="bg-red-950/60 border border-red-800/60 rounded p-1">
-                  <span className="text-sm font-bold text-red-300 block">{drinkNowCount}</span>
-                  <span className="text-[9px] text-red-400 block font-medium">Drink Now</span>
-                </div>
-                <div className="bg-emerald-950/60 border border-emerald-800/60 rounded p-1">
-                  <span className="text-sm font-bold text-emerald-300 block">{readyCount}</span>
-                  <span className="text-[9px] text-emerald-400 block font-medium">Ready</span>
-                </div>
-                <div className="bg-sky-950/60 border border-sky-800/60 rounded p-1">
-                  <span className="text-sm font-bold text-sky-300 block">{cellarHoldCount}</span>
-                  <span className="text-[9px] text-sky-400 block font-medium">Cellar/Hold</span>
-                </div>
-              </div>
-            </div>
+                            setWines(cleanedList);
+                            setLoading(false);
+                            setSyncStatus("synced");
+                            // Cache to localStorage
+                            localStorage.setItem("cellar_wines_backup", JSON.stringify(cleanedList));
+                        }, (error) => {
+                            console.error("Firebase sync error:", error);
+                            setSyncStatus("offline");
+                            loadFromLocalStorage();
+                        });
 
-            {/* WISHLIST SUMMARY */}
-            <div className="bg-stone-800/80 border border-stone-700/60 p-4 rounded-xl text-center flex flex-col justify-center">
-              <span className="text-[10px] text-stone-400 uppercase tracking-wider block font-semibold">Wishlist Items</span>
-              <span className="text-2xl font-bold text-sky-400">{wishlistWines.length}</span>
-              <span className="text-[10px] text-stone-500 block mt-0.5">Saved Recommendations</span>
-            </div>
-          </div>
+                    } catch (e) {
+                        console.error("Firebase init failed:", e);
+                        setSyncStatus("offline");
+                        loadFromLocalStorage();
+                    }
+                };
 
-          {/* NAVIGATION TABS */}
-          <div className="flex border-b border-stone-700 gap-2">
-            <button
-              onClick={() => setActiveTab('cellar')}
-              className={`px-5 py-3 font-semibold text-sm rounded-t-lg transition ${
-                activeTab === 'cellar' 
-                  ? 'bg-amber-600 text-stone-950 border-b-2 border-amber-400' 
-                  : 'bg-stone-800/50 text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              🍾 Current Cellar ({cellarWines.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('wishlist')}
-              className={`px-5 py-3 font-semibold text-sm rounded-t-lg transition ${
-                activeTab === 'wishlist' 
-                  ? 'bg-amber-600 text-stone-950 border-b-2 border-amber-400' 
-                  : 'bg-stone-800/50 text-stone-400 hover:text-stone-200'
-              }`}
-            >
-              📌 Wishlist / Recommendations ({wishlistWines.length})
-            </button>
-          </div>
+                initFirebase();
 
-          {/* TAB 1: CURRENT CELLAR (COMPACT 4-COLUMN GRID) */}
-          {activeTab === 'cellar' && (
-            <div className="space-y-4">
-              {/* Controls & Filters */}
-              <div className="flex flex-col md:flex-row gap-3 bg-stone-800/60 p-3 rounded-xl border border-stone-700/50 items-center justify-between">
-                <div className="flex flex-col md:flex-row gap-2 w-full md:w-auto flex-1">
-                  <input
-                    type="text"
-                    placeholder="Search producer, region, or wine..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-xs text-stone-100 focus:outline-none focus:border-amber-500"
-                  />
-                  <select
-                    value={selectedVarietal}
-                    onChange={(e) => setSelectedVarietal(e.target.value)}
-                    className="bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-xs text-stone-100 focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="All">All Varietals</option>
-                    <option value="Chardonnay">Chardonnay</option>
-                    <option value="Riesling">Riesling</option>
-                    <option value="Semillon">Semillon</option>
-                    <option value="Shiraz">Shiraz</option>
-                    <option value="Viognier">Viognier</option>
-                  </select>
+                return () => {
+                    if (unsubscribe) unsubscribe();
+                };
+            }, []);
 
-                  <select
-                    value={selectedTier}
-                    onChange={(e) => setSelectedTier(e.target.value)}
-                    className="bg-stone-900 border border-stone-700 rounded-lg px-3 py-1.5 text-xs text-stone-100 focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="All">All Tiers</option>
-                    <option value="Green">Green Tier</option>
-                    <option value="Yellow">Yellow Tier</option>
-                    <option value="Blue">Blue Tier</option>
-                    <option value="Red">Red Tier</option>
-                  </select>
-                </div>
+            const loadFromLocalStorage = () => {
+                const local = localStorage.getItem("cellar_wines_backup");
+                if (local) {
+                    try {
+                        const parsed = JSON.parse(local);
+                        // Clean legacy note string
+                        const cleaned = parsed.map(w => {
+                            if (!w.notes || w.notes.includes("Imported via 7-column CSV") || w.notes.includes("imported via") || w.notes.trim() === "") {
+                                w.notes = generateHallidayBlurb(w);
+                            }
+                            return w;
+                        });
+                        setWines(cleaned);
+                    } catch (e) {
+                        setWines(getSampleData());
+                    }
+                } else {
+                    setWines(getSampleData());
+                }
+                setLoading(false);
+            };
 
-                <button
-                  onClick={() => setSortByDrinkWindow(!sortByDrinkWindow)}
-                  className={`w-full md:w-auto px-3 py-1.5 rounded-lg text-xs font-bold transition border flex items-center justify-center gap-1.5 ${
-                    sortByDrinkWindow
-                      ? 'bg-amber-500 text-stone-950 border-amber-300 ring-2 ring-amber-400/50'
-                      : 'bg-stone-700/80 hover:bg-stone-600 text-stone-200 border-stone-600'
-                  }`}
-                >
-                  <span>⏳ Best to Drink</span>
-                  {sortByDrinkWindow && <span className="bg-stone-900 text-amber-300 text-[10px] px-1 rounded">Active</span>}
-                </button>
-              </div>
+            const saveWineToDb = async (wine) => {
+                setSyncStatus("syncing");
+                // Update local storage immediately
+                const existingIndex = wines.findIndex(w => w.id === wine.id);
+                let updatedWines = [];
+                if (existingIndex >= 0) {
+                    updatedWines = [...wines];
+                    updatedWines[existingIndex] = wine;
+                } else {
+                    updatedWines = [...wines, wine];
+                }
+                setWines(updatedWines);
+                localStorage.setItem("cellar_wines_backup", JSON.stringify(updatedWines));
 
-              {/* COMPACT 4-COLUMN BOTTLE GRID */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {filteredCellar.map((wine) => {
-                  const drinkStatus = getDrinkStatus(wine.drinkStart, wine.drinkEnd);
-                  return (
-                    <div key={wine.id} className="bg-stone-800/90 border border-stone-700/80 rounded-lg p-3 shadow flex flex-col justify-between space-y-2 hover:border-amber-500/50 transition">
-                      <div>
-                        {/* Top Line: Vintage + Badges (Tier Dot, Halliday Circle, Vivino Pill, Price Circle) + Delete */}
-                        <div className="flex justify-between items-center pb-1.5 border-b border-stone-700/50">
-                          <span className="text-[11px] font-bold text-amber-500 uppercase tracking-wider">
-                            {wine.vintage}
-                          </span>
+                // Try Firebase
+                try {
+                    if (window.FirebaseSDK && typeof __app_id !== 'undefined') {
+                        const { getFirestore, doc, setDoc } = window.FirebaseSDK;
+                        const db = getFirestore();
+                        const appId = __app_id;
+                        await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'wines', wine.id), wine);
+                    }
+                    setSyncStatus("synced");
+                } catch (e) {
+                    console.error("Firebase save failed, stored in localStorage", e);
+                    setSyncStatus("offline");
+                }
+            };
 
-                          <div className="flex items-center gap-1.5">
-                            {/* Tier Coloured Dot */}
-                            <span 
-                              className={`w-2.5 h-2.5 rounded-full ${TIER_COLORS[wine.tier]}`}
-                              title={`${wine.tier} Tier`}
+            const deleteWineFromDb = async (id) => {
+                setSyncStatus("syncing");
+                const updatedWines = wines.filter(w => w.id !== id);
+                setWines(updatedWines);
+                localStorage.setItem("cellar_wines_backup", JSON.stringify(updatedWines));
+
+                try {
+                    if (window.FirebaseSDK && typeof __app_id !== 'undefined') {
+                        const { getFirestore, doc, deleteDoc } = window.FirebaseSDK;
+                        const db = getFirestore();
+                        const appId = __app_id;
+                        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'wines', id));
+                    }
+                    setSyncStatus("synced");
+                } catch (e) {
+                    console.error("Firebase delete failed", e);
+                    setSyncStatus("offline");
+                }
+            };
+
+            const getSampleData = () => {
+                const sample = [
+                    { id: 'w1', producer: 'Penfolds', name: 'Grange', vintage: '2016', varietal: 'Shiraz', region: 'Barossa Valley', slot: 1, quantity: 2, price: '850', rating: '99', drinkBy: '2045', notes: '' },
+                    { id: 'w2', producer: 'Henschke', name: 'Hill of Grace', vintage: '2017', varietal: 'Shiraz', region: 'Eden Valley', slot: 2, quantity: 1, price: '920', rating: '98', drinkBy: '2048', notes: '' },
+                    { id: 'w3', producer: 'Cullen', name: 'Diana Madeline', vintage: '2019', varietal: 'Cabernet Sauvignon', region: 'Margaret River', slot: 15, quantity: 3, price: '145', rating: '97', drinkBy: '2038', notes: '' },
+                    { id: 'w4', producer: 'Leeuwin Estate', name: 'Art Series', vintage: '2020', varietal: 'Chardonnay', region: 'Margaret River', slot: 24, quantity: 2, price: '130', rating: '98', drinkBy: '2032', notes: '' },
+                    { id: 'w5', producer: 'Grosset', name: 'Polish Hill', vintage: '2022', varietal: 'Riesling', region: 'Clare Valley', slot: 40, quantity: 4, price: '65', rating: '96', drinkBy: '2037', notes: '' },
+                    { id: 'w6', producer: 'Mount Mary', name: 'Quintet', vintage: '2018', varietal: 'Cabernet Sauvignon', region: 'Yarra Valley', slot: 52, quantity: 2, price: '160', rating: '97', drinkBy: '2040', notes: '' }
+                ];
+
+                return sample.map(w => ({
+                    ...w,
+                    notes: generateHallidayBlurb(w)
+                }));
+            };
+
+            const filteredWines = useMemo(() => {
+                return wines.filter(wine => {
+                    const matchesSearch = 
+                        wine.producer?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        wine.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        wine.region?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        wine.varietal?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                        wine.vintage?.toString().includes(searchQuery);
+
+                    const matchesVarietal = filterVarietal === "ALL" || wine.varietal === filterVarietal;
+                    const matchesRegion = filterRegion === "ALL" || wine.region === filterRegion;
+
+                    let matchesStatus = true;
+                    if (filterStatus === "DRINK_NOW") {
+                        const currentYear = new Date().getFullYear();
+                        matchesStatus = wine.drinkBy && parseInt(wine.drinkBy) <= currentYear + 2;
+                    } else if (filterStatus === "CELLAR") {
+                        const currentYear = new Date().getFullYear();
+                        matchesStatus = wine.drinkBy && parseInt(wine.drinkBy) > currentYear + 2;
+                    }
+
+                    return matchesSearch && matchesVarietal && matchesRegion && matchesStatus;
+                });
+            }, [wines, searchQuery, filterVarietal, filterRegion, filterStatus]);
+
+            // Slot map for fast 1-166 grid rendering
+            const slotMap = useMemo(() => {
+                const map = {};
+                wines.forEach(w => {
+                    const slotNum = parseInt(w.slot);
+                    if (slotNum >= 1 && slotNum <= DEFAULT_RACK_SIZE) {
+                        map[slotNum] = w;
+                    }
+                });
+                return map;
+            }, [wines]);
+
+            // Stats
+            const stats = useMemo(() => {
+                const totalBottles = wines.reduce((sum, w) => sum + (parseInt(w.quantity) || 1), 0);
+                const totalValue = wines.reduce((sum, w) => sum + ((parseFloat(w.price) || 0) * (parseInt(w.quantity) || 1)), 0);
+                const avgRating = wines.length ? (wines.reduce((sum, w) => sum + (parseFloat(w.rating) || 0), 0) / wines.length).toFixed(1) : 0;
+                const occupiedSlots = Object.keys(slotMap).length;
+
+                return { totalBottles, totalValue, avgRating, occupiedSlots };
+            }, [wines, slotMap]);
+
+            // Unique lists for filters
+            const varietals = useMemo(() => ["ALL", ...new Set(wines.map(w => w.varietal).filter(Boolean))], [wines]);
+            const regions = useMemo(() => ["ALL", ...new Set(wines.map(w => w.region).filter(Boolean))], [wines]);
+
+            const openAddModal = (slotNum = null) => {
+                setEditingWine(null);
+                setFormData({
+                    producer: "",
+                    name: "",
+                    vintage: new Date().getFullYear().toString(),
+                    varietal: "Shiraz",
+                    region: "Barossa Valley",
+                    slot: slotNum || findNextAvailableSlot(),
+                    quantity: 1,
+                    price: "",
+                    rating: "95",
+                    drinkBy: (new Date().getFullYear() + 10).toString(),
+                    notes: ""
+                });
+                setIsModalOpen(true);
+            };
+
+            const openEditModal = (wine) => {
+                setEditingWine(wine);
+                setFormData({ ...wine });
+                setIsModalOpen(true);
+            };
+
+            const findNextAvailableSlot = () => {
+                for (let i = 1; i <= DEFAULT_RACK_SIZE; i++) {
+                    if (!slotMap[i]) return i;
+                }
+                return 1;
+            };
+
+            const handleFormSubmit = (e) => {
+                e.preventDefault();
+                let blurb = formData.notes;
+
+                // Ensure notes are Halliday style if blank or contains old import phrase
+                if (!blurb || blurb.includes("Imported via 7-column CSV") || blurb.includes("imported via") || blurb.trim() === "") {
+                    blurb = generateHallidayBlurb(formData);
+                }
+
+                const newWine = {
+                    ...formData,
+                    id: editingWine ? editingWine.id : 'wine_' + Date.now(),
+                    notes: blurb,
+                    slot: parseInt(formData.slot) || 1,
+                    quantity: parseInt(formData.quantity) || 1
+                };
+
+                saveWineToDb(newWine);
+                setIsModalOpen(false);
+            };
+
+            const handleDelete = (id) => {
+                if (window.confirm("Are you sure you want to remove this bottle from your cellar?")) {
+                    deleteWineFromDb(id);
+                    setIsModalOpen(false);
+                }
+            };
+
+            // CSV Import Cleanup & Halliday Generation
+            const handleCSVImport = (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const text = e.target.result;
+                    const lines = text.split('\n');
+                    const importedWines = [];
+
+                    lines.forEach((line, index) => {
+                        if (index === 0 && line.toLowerCase().includes("producer")) return; // skip header
+                        if (!line.trim()) return;
+
+                        const cols = line.split(',').map(c => c.trim().replace(/^"(.*)"$/, '$1'));
+                        if (cols.length >= 2) {
+                            const wineObj = {
+                                id: 'csv_' + Date.now() + '_' + index,
+                                producer: cols[0] || 'Unknown Producer',
+                                name: cols[1] || 'Estate Red',
+                                vintage: cols[2] || '2019',
+                                varietal: cols[3] || 'Shiraz',
+                                region: cols[4] || 'Barossa Valley',
+                                slot: parseInt(cols[5]) || (index % DEFAULT_RACK_SIZE) + 1,
+                                quantity: parseInt(cols[6]) || 1,
+                                price: cols[7] || '50',
+                                rating: cols[8] || '94',
+                                drinkBy: cols[9] || '2030',
+                                notes: cols[10] && !cols[10].includes("Imported via 7-column CSV") ? cols[10] : ''
+                            };
+
+                            // Always set a clean, professional Halliday Wine Companion blurb
+                            wineObj.notes = generateHallidayBlurb(wineObj);
+                            importedWines.push(wineObj);
+                        }
+                    });
+
+                    if (importedWines.length > 0) {
+                        importedWines.forEach(w => saveWineToDb(w));
+                        alert(`Successfully imported ${importedWines.length} wines! Custom Halliday Guide blurbs generated.`);
+                    }
+                };
+                reader.readAsText(file);
+            };
+
+            // CSV Export
+            const handleCSVExport = () => {
+                let csv = "Producer,Wine Name,Vintage,Varietal,Region,Rack Slot,Quantity,Price,Rating,Drink By,Notes (Halliday Blurb)\n";
+                wines.forEach(w => {
+                    csv += `"${w.producer}","${w.name}","${w.vintage}","${w.varietal}","${w.region}",${w.slot},${w.quantity},"${w.price}","${w.rating}","${w.drinkBy}","${(w.notes || '').replace(/"/g, '""')}"\n`;
+                });
+
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.setAttribute('href', url);
+                a.setAttribute('download', `Cellar_Tracker_Export_${new Date().toISOString().slice(0, 10)}.csv`);
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+            };
+
+            return (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+                    {/* Header */}
+                    <header className="flex flex-col md:flex-row md:items-center md:justify-between pb-6 border-b border-slate-800 gap-4">
+                        <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-xl bg-burgundy-900 border border-burgundy-700 flex items-center justify-center text-burgundy-400 shadow-lg shadow-burgundy-950/50">
+                                <i data-lucide="wine" className="w-7 h-7"></i>
+                            </div>
+                            <div>
+                                <h1 className="text-2xl font-bold tracking-tight text-white flex items-center gap-2">
+                                    Australian Cellar Tracker
+                                    <span className="text-xs font-semibold uppercase px-2 py-0.5 rounded-full bg-burgundy-950 text-burgundy-300 border border-burgundy-800/60">
+                                        Halliday Edition
+                                    </span>
+                                </h1>
+                                <p className="text-xs text-slate-400">Real-time sync across PC & iOS • 166-Bottle Rack Grid</p>
+                            </div>
+                        </div>
+
+                        {/* Controls Toolbar */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            <button 
+                                onClick={() => openAddModal()} 
+                                className="px-4 py-2 bg-burgundy-700 hover:bg-burgundy-600 text-white font-medium text-sm rounded-lg flex items-center gap-2 transition shadow-md shadow-burgundy-900/30"
+                            >
+                                <i data-lucide="plus" className="w-4 h-4"></i> Add Bottle
+                            </button>
+
+                            <label className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium rounded-lg cursor-pointer flex items-center gap-2 border border-slate-700 transition">
+                                <i data-lucide="upload" className="w-4 h-4 text-slate-400"></i> Import CSV
+                                <input type="file" accept=".csv" onChange={handleCSVImport} className="hidden" />
+                            </label>
+
+                            <button 
+                                onClick={handleCSVExport}
+                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium rounded-lg flex items-center gap-2 border border-slate-700 transition"
+                            >
+                                <i data-lucide="download" className="w-4 h-4 text-slate-400"></i> Export CSV
+                            </button>
+
+                            {/* View Switcher */}
+                            <div className="flex bg-slate-800 p-1 rounded-lg border border-slate-700">
+                                <button 
+                                    onClick={() => setViewMode("grid")}
+                                    className={`p-1.5 rounded-md text-sm transition ${viewMode === "grid" ? "bg-burgundy-800 text-white" : "text-slate-400 hover:text-white"}`}
+                                    title="166-Bottle Rack Grid View"
+                                >
+                                    <i data-lucide="grid" className="w-4 h-4"></i>
+                                </button>
+                                <button 
+                                    onClick={() => setViewMode("list")}
+                                    className={`p-1.5 rounded-md text-sm transition ${viewMode === "list" ? "bg-burgundy-800 text-white" : "text-slate-400 hover:text-white"}`}
+                                    title="List View"
+                                >
+                                    <i data-lucide="list" className="w-4 h-4"></i>
+                                </button>
+                            </div>
+
+                            {/* Sync Status Badge */}
+                            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-800/80 border border-slate-700 text-xs">
+                                <span className={`w-2 h-2 rounded-full ${syncStatus === 'synced' ? 'bg-emerald-500 animate-pulse' : syncStatus === 'syncing' ? 'bg-amber-500 animate-ping' : 'bg-slate-500'}`}></span>
+                                <span className="text-slate-300 font-medium">
+                                    {syncStatus === 'synced' ? 'Cloud Synced' : syncStatus === 'syncing' ? 'Syncing...' : 'Offline Backup'}
+                                </span>
+                            </div>
+                        </div>
+                    </header>
+
+                    {/* Summary Cards */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 my-6">
+                        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-xl shadow-sm">
+                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Total Inventory</div>
+                            <div className="text-2xl font-bold text-white mt-1 flex items-baseline gap-2">
+                                {stats.totalBottles} <span className="text-xs font-normal text-slate-400">bottles</span>
+                            </div>
+                        </div>
+                        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-xl shadow-sm">
+                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Rack Occupancy</div>
+                            <div className="text-2xl font-bold text-burgundy-400 mt-1 flex items-baseline gap-2">
+                                {stats.occupiedSlots} / {DEFAULT_RACK_SIZE} <span className="text-xs font-normal text-slate-400">slots</span>
+                            </div>
+                        </div>
+                        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-xl shadow-sm">
+                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Estimated Value</div>
+                            <div className="text-2xl font-bold text-emerald-400 mt-1">
+                                ${stats.totalValue.toLocaleString()} <span className="text-xs font-normal text-slate-400">AUD</span>
+                            </div>
+                        </div>
+                        <div className="bg-slate-800/60 border border-slate-700/60 p-4 rounded-xl shadow-sm">
+                            <div className="text-xs font-medium text-slate-400 uppercase tracking-wider">Avg Halliday Score</div>
+                            <div className="text-2xl font-bold text-amber-400 mt-1 flex items-center gap-1">
+                                <i data-lucide="star" className="w-5 h-5 fill-amber-400 text-amber-400"></i>
+                                {stats.avgRating} <span className="text-xs font-normal text-slate-400">/ 100</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Filters & Search */}
+                    <div className="bg-slate-800/80 p-4 rounded-xl border border-slate-700/80 mb-6 flex flex-wrap gap-3 items-center justify-between">
+                        <div className="relative flex-1 min-w-[220px]">
+                            <i data-lucide="search" className="w-4 h-4 absolute left-3 top-3 text-slate-400"></i>
+                            <input 
+                                type="text"
+                                placeholder="Search producer, wine, varietal, region..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="w-full pl-9 pr-4 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-burgundy-600"
                             />
+                        </div>
 
-                            {/* Halliday Orange Circle */}
-                            <span 
-                              className="w-5 h-5 rounded-full bg-amber-500 text-stone-950 text-[10px] font-extrabold flex items-center justify-center shadow"
-                              title={`Halliday Score: ${wine.hallidayScore}`}
+                        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+                            <select 
+                                value={filterVarietal}
+                                onChange={(e) => setFilterVarietal(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 text-xs rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600"
                             >
-                              {wine.hallidayScore}
-                            </span>
+                                <option value="ALL">All Varietals</option>
+                                {varietals.filter(v => v !== "ALL").map(v => <option key={v} value={v}>{v}</option>)}
+                            </select>
 
-                            {/* Vivino Black Star Pill */}
-                            <span 
-                              className="bg-black text-amber-400 border border-stone-800 px-1 py-0.2 rounded text-[10px] font-bold flex items-center gap-0.5"
-                              title={`Vivino Rating: ${wine.vivinoRating}`}
+                            <select 
+                                value={filterRegion}
+                                onChange={(e) => setFilterRegion(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 text-xs rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600"
                             >
-                              ★{wine.vivinoRating}
-                            </span>
+                                <option value="ALL">All Regions</option>
+                                {regions.filter(r => r !== "ALL").map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
 
-                            {/* Green Price Circle */}
-                            <span 
-                              className="h-5 px-1.5 rounded-full bg-emerald-600 text-stone-950 text-[10px] font-extrabold flex items-center justify-center shadow"
-                              title={`Market Price: $${wine.priceAud} AUD`}
+                            <select 
+                                value={filterStatus}
+                                onChange={(e) => setFilterStatus(e.target.value)}
+                                className="bg-slate-900 border border-slate-700 text-xs rounded-lg px-3 py-2 text-slate-200 focus:outline-none focus:ring-2 focus:ring-burgundy-600"
                             >
-                              ${wine.priceAud}
-                            </span>
+                                <option value="ALL">All Drinking Windows</option>
+                                <option value="DRINK_NOW">Ready to Drink</option>
+                                <option value="CELLAR">Keep Cellaring</option>
+                            </select>
+                        </div>
+                    </div>
 
-                            {/* Trash Icon */}
-                            {!isReadOnly && (
-                              <button 
-                                onClick={() => deleteWine(wine.id)}
-                                className="text-stone-500 hover:text-red-400 text-xs ml-0.5"
-                                title="Delete Bottle"
-                              >
-                                🗑️
-                              </button>
+                    {/* MAIN VIEW CONTENT */}
+                    {loading ? (
+                        <div className="py-20 text-center text-slate-400">
+                            <div className="w-8 h-8 border-4 border-burgundy-600 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                            Loading cellar rack state...
+                        </div>
+                    ) : viewMode === "grid" ? (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-2xl">
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                                        <i data-lucide="layout-grid" className="w-5 h-5 text-burgundy-500"></i>
+                                        166-Slot Main Cellar Rack
+                                    </h2>
+                                    <p className="text-xs text-slate-400">Click any occupied slot to view Halliday blurbs or an empty slot to place a bottle.</p>
+                                </div>
+                                <div className="flex items-center gap-4 text-xs text-slate-400">
+                                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-burgundy-900 border border-burgundy-500 rounded"></span> Occupied</span>
+                                    <span className="flex items-center gap-1.5"><span className="w-3 h-3 bg-slate-800/80 border border-slate-700 rounded"></span> Empty</span>
+                                </div>
+                            </div>
+
+                            {/* 166 Rack Grid Layout */}
+                            <div className="grid grid-cols-6 sm:grid-cols-10 md:grid-cols-12 lg:grid-cols-14 xl:grid-cols-16 gap-2 max-h-[600px] overflow-y-auto p-2 custom-scrollbar bg-slate-950/60 rounded-xl border border-slate-800">
+                                {Array.from({ length: DEFAULT_RACK_SIZE }, (_, i) => i + 1).map(slotNum => {
+                                    const wine = slotMap[slotNum];
+                                    const isSelected = selectedSlot === slotNum;
+
+                                    return (
+                                        <div 
+                                            key={slotNum}
+                                            onClick={() => {
+                                                setSelectedSlot(slotNum);
+                                                if (!wine) {
+                                                    openAddModal(slotNum);
+                                                }
+                                            }}
+                                            className={`aspect-square rounded-lg p-1 flex flex-col justify-between items-center text-center cursor-pointer transition relative group border ${
+                                                wine 
+                                                    ? 'bg-burgundy-950/80 border-burgundy-700/80 text-burgundy-100 hover:border-burgundy-400 shadow-sm' 
+                                                    : 'bg-slate-900/60 border-slate-800 text-slate-600 hover:border-slate-600 hover:text-slate-400'
+                                            }`}
+                                        >
+                                            <span className="text-[10px] font-mono text-slate-400 opacity-70">#{slotNum}</span>
+                                            
+                                            {wine ? (
+                                                <>
+                                                    <i data-lucide="wine" className="w-4 h-4 text-burgundy-400 group-hover:scale-110 transition-transform"></i>
+                                                    <div className="text-[9px] font-semibold truncate w-full px-0.5 text-slate-200">
+                                                        {wine.vintage}
+                                                    </div>
+                                                </>
+                                            ) : (
+                                                <i data-lucide="plus-circle" className="w-3.5 h-3.5 opacity-0 group-hover:opacity-100 text-slate-500 transition-opacity"></i>
+                                            )}
+
+                                            {/* Hover Tooltip Card */}
+                                            {wine && (
+                                                <div className="absolute z-20 bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity text-left">
+                                                    <div className="text-xs font-bold text-white truncate">{wine.producer}</div>
+                                                    <div className="text-xs text-burgundy-300 truncate">{wine.name} ({wine.vintage})</div>
+                                                    <div className="text-[11px] text-slate-400 mt-1">{wine.varietal} • {wine.region}</div>
+                                                    <div className="mt-2 text-[11px] text-slate-300 bg-slate-900/90 p-2 rounded border border-slate-700/50 italic line-clamp-3">
+                                                        "{wine.notes}"
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    );
+                                })}
+                            </div>
+
+                            {/* Quick Slot Preview Footer */}
+                            {selectedSlot && slotMap[selectedSlot] && (
+                                <div className="mt-4 p-4 bg-slate-800/90 border border-burgundy-900/60 rounded-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+                                    <div className="space-y-1">
+                                        <div className="flex items-center gap-2">
+                                            <span className="px-2 py-0.5 bg-burgundy-900 text-burgundy-200 text-xs font-mono font-bold rounded">Slot #{selectedSlot}</span>
+                                            <h3 className="font-bold text-white text-base">
+                                                {slotMap[selectedSlot].producer} - {slotMap[selectedSlot].name} ({slotMap[selectedSlot].vintage})
+                                            </h3>
+                                        </div>
+                                        <p className="text-xs text-slate-400">
+                                            {slotMap[selectedSlot].varietal} | {slotMap[selectedSlot].region} | Qty: {slotMap[selectedSlot].quantity} | Halliday Rating: <span className="text-amber-400 font-semibold">{slotMap[selectedSlot].rating}/100</span>
+                                        </p>
+                                        <p className="text-xs text-slate-300 italic bg-slate-900/80 p-2.5 rounded-lg border border-slate-700/60 mt-2 max-w-3xl">
+                                            "{slotMap[selectedSlot].notes}"
+                                        </p>
+                                    </div>
+                                    <button 
+                                        onClick={() => openEditModal(slotMap[selectedSlot])}
+                                        className="px-4 py-2 bg-burgundy-800 hover:bg-burgundy-700 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 shrink-0"
+                                    >
+                                        <i data-lucide="edit-3" className="w-3.5 h-3.5"></i> Edit Details
+                                    </button>
+                                </div>
                             )}
-                          </div>
                         </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {filteredWines.length === 0 ? (
+                                <div className="bg-slate-800/40 border border-slate-800 rounded-xl p-12 text-center text-slate-400">
+                                    No wines matched your filter or search query.
+                                </div>
+                            ) : (
+                                filteredWines.map(wine => (
+                                    <div 
+                                        key={wine.id} 
+                                        className="bg-slate-800/80 border border-slate-700/80 rounded-xl p-5 hover:border-burgundy-800/80 transition-all shadow-md flex flex-col lg:flex-row justify-between gap-4"
+                                    >
+                                        <div className="space-y-2 flex-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="px-2.5 py-1 bg-burgundy-950 text-burgundy-300 border border-burgundy-800/80 text-xs font-bold font-mono rounded-md">
+                                                    Slot #{wine.slot}
+                                                </span>
+                                                <h3 className="text-lg font-bold text-white">
+                                                    {wine.producer} <span className="font-normal text-slate-300">{wine.name}</span> ({wine.vintage})
+                                                </h3>
+                                                <span className="text-xs px-2 py-0.5 rounded-full bg-slate-700 text-slate-300 font-medium">
+                                                    {wine.varietal}
+                                                </span>
+                                            </div>
 
-                        {/* Producer & Right-Aligned Region */}
-                        <div className="flex justify-between items-baseline mt-1.5">
-                          <h3 className="text-sm font-bold text-stone-100 truncate max-w-[65%]">{wine.producer}</h3>
-                          <span className="text-[10px] font-medium text-stone-400 truncate max-w-[35%] text-right">{wine.region}</span>
+                                            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+                                                <span><strong className="text-slate-300">Region:</strong> {wine.region}</span>
+                                                <span><strong className="text-slate-300">Quantity:</strong> {wine.quantity} bottle(s)</span>
+                                                <span><strong className="text-slate-300">Est. Price:</strong> ${wine.price || 'N/A'} AUD</span>
+                                                <span><strong className="text-slate-300">Drink Window:</strong> Through {wine.drinkBy || '2035'}</span>
+                                            </div>
+
+                                            {/* Halliday Tasting Note */}
+                                            <div className="mt-3 bg-slate-900/90 border border-slate-700/50 p-3 rounded-lg">
+                                                <div className="text-[11px] font-semibold text-amber-400 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                                                    <i data-lucide="award" className="w-3.5 h-3.5"></i>
+                                                    Halliday Wine Companion Tasting Note ({wine.rating || '95'} pts)
+                                                </div>
+                                                <p className="text-xs text-slate-300 italic leading-relaxed">
+                                                    "{wine.notes}"
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="flex lg:flex-col items-center lg:items-end justify-between lg:justify-center border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-700/60 gap-3">
+                                            <div className="text-right">
+                                                <div className="text-xs text-slate-400">Halliday Rating</div>
+                                                <div className="text-xl font-bold text-amber-400 flex items-center justify-end gap-1">
+                                                    <i data-lucide="star" className="w-4 h-4 fill-amber-400"></i>
+                                                    {wine.rating || 95}
+                                                </div>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                <button 
+                                                    onClick={() => openEditModal(wine)}
+                                                    className="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 text-white text-xs font-medium rounded-lg transition"
+                                                >
+                                                    Edit
+                                                </button>
+                                                <button 
+                                                    onClick={() => handleDelete(wine.id)}
+                                                    className="px-3 py-1.5 bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800/50 text-xs font-medium rounded-lg transition"
+                                                >
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
-
-                        {/* Wine Name */}
-                        <p className="text-xs text-stone-300 font-medium truncate">{wine.name}</p>
-
-                        {/* Drink Status Badge */}
-                        <div className="mt-2">
-                          <span className={`inline-block border px-1.5 py-0.5 rounded text-[10px] font-bold ${drinkStatus.color}`}>
-                            {drinkStatus.label}
-                          </span>
-                        </div>
-
-                        {/* Personal Note Summary */}
-                        {wine.notes && (
-                          <p className="text-[10px] text-stone-400 italic mt-1.5 line-clamp-2 bg-stone-900/50 p-1.5 rounded">
-                            "{wine.notes}"
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Bottom Controls */}
-                      <div className="flex justify-between items-center pt-1.5 border-t border-stone-700/50 text-xs">
-                        {!isReadOnly ? (
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={() => updateQuantity(wine.id, -1)}
-                              className="w-5 h-5 bg-stone-700 hover:bg-stone-600 rounded font-bold text-stone-200 text-xs flex items-center justify-center"
-                            >
-                              -
-                            </button>
-                            <span className="font-bold text-stone-100 text-xs px-1">{wine.quantity}</span>
-                            <button 
-                              onClick={() => updateQuantity(wine.id, 1)}
-                              className="w-5 h-5 bg-stone-700 hover:bg-stone-600 rounded font-bold text-stone-200 text-xs flex items-center justify-center"
-                            >
-                              +
-                            </button>
-                          </div>
-                        ) : (
-                          <span className="text-[10px] text-stone-400">Qty: {wine.quantity}</span>
-                        )}
-
-                        {!isReadOnly && (
-                          <button
-                            onClick={() => setSelectedWineForTasting(wine)}
-                            className="text-[10px] text-stone-300 hover:text-amber-400 underline"
-                          >
-                            + Tasting
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: WISHLIST & RECOMMENDATIONS */}
-          {activeTab === 'wishlist' && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {wishlistWines.map((wine) => (
-                  <div key={wine.id} className="bg-stone-800/90 border border-stone-700/80 rounded-lg p-3 shadow flex flex-col justify-between space-y-2">
-                    <div>
-                      <div className="flex justify-between items-center pb-1.5 border-b border-stone-700/50">
-                        <span className="text-[11px] font-bold text-sky-400 uppercase tracking-wider">{wine.vintage}</span>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`w-2.5 h-2.5 rounded-full ${TIER_COLORS[wine.tier]}`} />
-                          {!isReadOnly && (
-                            <button onClick={() => deleteWine(wine.id)} className="text-stone-500 hover:text-red-400 text-xs">🗑️</button>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="flex justify-between items-baseline mt-1.5">
-                        <h3 className="text-sm font-bold text-stone-100 truncate">{wine.producer}</h3>
-                        <span className="text-[10px] font-medium text-stone-400 truncate">{wine.varietal}</span>
-                      </div>
-                      <p className="text-xs text-stone-300 font-medium truncate">{wine.name}</p>
-                    </div>
-
-                    {!isReadOnly && (
-                      <button
-                        onClick={() => moveToCellar(wine.id)}
-                        className="w-full bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold py-1.5 rounded text-xs transition"
-                      >
-                        + Move to Cellar
-                      </button>
                     )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {/* ADD NEW WINE MODAL (WITH DATABASE LOOKUP) */}
-          {showAddModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50 overflow-y-auto">
-              <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-lg w-full space-y-3 shadow-2xl my-8">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-base font-bold text-amber-400">Add Wine to Cellar</h3>
-                  <button onClick={() => setShowAddModal(false)} className="text-stone-400 hover:text-stone-200 font-bold">✕</button>
-                </div>
+                    {}
+                    {isModalOpen && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm">
+                            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-xl w-full p-6 shadow-2xl max-h-[90vh] overflow-y-auto custom-scrollbar">
+                                <div className="flex justify-between items-center pb-4 border-b border-slate-800">
+                                    <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                                        <i data-lucide="wine" className="w-5 h-5 text-burgundy-500"></i>
+                                        {editingWine ? 'Edit Wine Entry' : 'Add New Bottle to Cellar'}
+                                    </h2>
+                                    <button 
+                                        onClick={() => setIsModalOpen(false)}
+                                        className="text-slate-400 hover:text-white p-1"
+                                    >
+                                        <i data-lucide="x" className="w-5 h-5"></i>
+                                    </button>
+                                </div>
 
-                {/* Database Search Engine */}
-                <div className="bg-stone-900/90 border border-stone-700 p-3 rounded-lg space-y-2">
-                  <label className="block text-[11px] font-semibold text-amber-400 uppercase tracking-wider">
-                    🔍 Search Halliday / Vivino Database
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Type Penfolds, Grosset, Leeuwin, Riesling..."
-                    value={dbSearchQuery}
-                    onChange={(e) => handleDbSearch(e.target.value)}
-                    className="w-full bg-stone-800 border border-stone-700 rounded p-2 text-xs text-stone-100 focus:outline-none focus:border-amber-500"
-                  />
+                                <form onSubmit={handleFormSubmit} className="mt-4 space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Producer / Winery *</label>
+                                            <input 
+                                                type="text" 
+                                                required
+                                                value={formData.producer} 
+                                                onChange={e => setFormData({...formData, producer: e.target.value})}
+                                                placeholder="e.g. Penfolds"
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Wine Name / Label *</label>
+                                            <input 
+                                                type="text" 
+                                                required
+                                                value={formData.name} 
+                                                onChange={e => setFormData({...formData, name: e.target.value})}
+                                                placeholder="e.g. St Henri"
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                    </div>
 
-                  {searchResults.length > 0 && (
-                    <div className="max-h-36 overflow-y-auto space-y-1 bg-stone-950 p-2 rounded border border-stone-800">
-                      {searchResults.map((item, idx) => (
-                        <div
-                          key={idx}
-                          onClick={() => selectDbItem(item)}
-                          className="p-1.5 hover:bg-amber-900/30 rounded cursor-pointer flex justify-between items-center text-xs transition"
-                        >
-                          <div>
-                            <span className="font-bold text-stone-100">{item.producer}</span> - {item.name}
-                            <span className="text-[10px] text-stone-400 block">{item.region} • {item.tier} Tier</span>
-                          </div>
-                          <span className="text-[10px] bg-amber-500 text-stone-950 font-bold px-1.5 py-0.5 rounded">Auto-Fill</span>
+                                    <div className="grid grid-cols-3 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Vintage *</label>
+                                            <input 
+                                                type="number" 
+                                                required
+                                                value={formData.vintage} 
+                                                onChange={e => setFormData({...formData, vintage: e.target.value})}
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Varietal</label>
+                                            <input 
+                                                type="text" 
+                                                value={formData.varietal} 
+                                                onChange={e => setFormData({...formData, varietal: e.target.value})}
+                                                placeholder="Shiraz"
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Region</label>
+                                            <input 
+                                                type="text" 
+                                                value={formData.region} 
+                                                onChange={e => setFormData({...formData, region: e.target.value})}
+                                                placeholder="Barossa Valley"
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-4 gap-4">
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Rack Slot (1-166)</label>
+                                            <input 
+                                                type="number" 
+                                                min="1" 
+                                                max="166"
+                                                value={formData.slot} 
+                                                onChange={e => setFormData({...formData, slot: e.target.value})}
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Quantity</label>
+                                            <input 
+                                                type="number" 
+                                                min="1"
+                                                value={formData.quantity} 
+                                                onChange={e => setFormData({...formData, quantity: e.target.value})}
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Price (AUD)</label>
+                                            <input 
+                                                type="number" 
+                                                value={formData.price} 
+                                                onChange={e => setFormData({...formData, price: e.target.value})}
+                                                placeholder="120"
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs font-medium text-slate-300 mb-1">Rating (/100)</label>
+                                            <input 
+                                                type="number" 
+                                                min="80" 
+                                                max="100"
+                                                value={formData.rating} 
+                                                onChange={e => setFormData({...formData, rating: e.target.value})}
+                                                className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <div className="flex justify-between items-center mb-1">
+                                            <label className="block text-xs font-medium text-slate-300">Halliday Tasting Note Blurb</label>
+                                            <button 
+                                                type="button" 
+                                                onClick={() => setFormData({...formData, notes: generateHallidayBlurb(formData)})}
+                                                className="text-[11px] text-burgundy-400 hover:underline font-medium"
+                                            >
+                                                Auto-Generate Halliday Note
+                                            </button>
+                                        </div>
+                                        <textarea 
+                                            rows="3"
+                                            value={formData.notes} 
+                                            onChange={e => setFormData({...formData, notes: e.target.value})}
+                                            placeholder="Leave blank to auto-generate a professional Halliday Companion tasting blurb..."
+                                            className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-sm text-white focus:outline-none focus:ring-2 focus:ring-burgundy-600 italic"
+                                        ></textarea>
+                                    </div>
+
+                                    <div className="flex justify-between items-center pt-4 border-t border-slate-800">
+                                        {editingWine ? (
+                                            <button 
+                                                type="button" 
+                                                onClick={() => handleDelete(editingWine.id)}
+                                                className="px-4 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 border border-rose-800 text-xs font-semibold rounded-lg transition"
+                                            >
+                                                Delete Entry
+                                            </button>
+                                        ) : <div></div>}
+
+                                        <div className="flex gap-2">
+                                            <button 
+                                                type="button" 
+                                                onClick={() => setIsModalOpen(false)}
+                                                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium rounded-lg transition"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button 
+                                                type="submit" 
+                                                className="px-5 py-2 bg-burgundy-700 hover:bg-burgundy-600 text-white text-xs font-bold rounded-lg shadow-md transition"
+                                            >
+                                                {editingWine ? 'Update Wine' : 'Add Wine'}
+                                            </button>
+                                        </div>
+                                    </div>
+                                </form>
+                            </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                    )}
                 </div>
+            );
+        }
 
-                <form onSubmit={handleAddWine} className="space-y-3 text-xs">
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-stone-400 mb-1">Producer</label>
-                      <input required type="text" value={newWine.producer} onChange={e => setNewWine({...newWine, producer: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Wine Name</label>
-                      <input required type="text" value={newWine.name} onChange={e => setNewWine({...newWine, name: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                  </div>
+        const root = ReactDOM.createRoot(document.getElementById("root"));
+        root.render(<App />);
 
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-stone-400 mb-1">Vintage</label>
-                      <input type="text" value={newWine.vintage} onChange={e => setNewWine({...newWine, vintage: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Region</label>
-                      <input type="text" value={newWine.region} onChange={e => setNewWine({...newWine, region: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Varietal</label>
-                      <input type="text" value={newWine.varietal} onChange={e => setNewWine({...newWine, varietal: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-stone-400 mb-1">Tier Classification</label>
-                      <select value={newWine.tier} onChange={e => setNewWine({...newWine, tier: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100">
-                        <option value="Green">Green (Everyday)</option>
-                        <option value="Yellow">Yellow (Premium Everyday)</option>
-                        <option value="Blue">Blue (Cellar Classic)</option>
-                        <option value="Red">Red (Iconic / Special)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Cost Price ($)</label>
-                      <input type="number" value={newWine.costPriceAud} onChange={e => setNewWine({...newWine, costPriceAud: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Market Retail ($)</label>
-                      <input type="number" value={newWine.priceAud} onChange={e => setNewWine({...newWine, priceAud: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-2">
-                    <div>
-                      <label className="block text-stone-400 mb-1">Halliday</label>
-                      <input type="number" value={newWine.hallidayScore} onChange={e => setNewWine({...newWine, hallidayScore: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Vivino</label>
-                      <input type="number" step="0.1" value={newWine.vivinoRating} onChange={e => setNewWine({...newWine, vivinoRating: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Quantity</label>
-                      <input type="number" value={newWine.quantity} onChange={e => setNewWine({...newWine, quantity: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="block text-stone-400 mb-1">Peak Start Year</label>
-                      <input type="number" value={newWine.drinkStart} onChange={e => setNewWine({...newWine, drinkStart: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                    <div>
-                      <label className="block text-stone-400 mb-1">Peak End Year</label>
-                      <input type="number" value={newWine.drinkEnd} onChange={e => setNewWine({...newWine, drinkEnd: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button type="button" onClick={() => setShowAddModal(false)} className="px-3 py-1.5 bg-stone-700 text-stone-300 rounded">Cancel</button>
-                    <button type="submit" className="px-3 py-1.5 bg-emerald-600 text-stone-950 font-bold rounded">Save Wine</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* QUICK WISHLIST MODAL */}
-          {showWishlistModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-sm w-full space-y-3 shadow-2xl">
-                <h3 className="text-base font-bold text-sky-400">+ Add to Wishlist</h3>
-                <form onSubmit={handleAddWishlist} className="space-y-3 text-xs">
-                  <div>
-                    <label className="block text-stone-400 mb-1">Year / Vintage</label>
-                    <input type="text" value={wishlistForm.vintage} onChange={e => setWishlistForm({...wishlistForm, vintage: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                  </div>
-                  <div>
-                    <label className="block text-stone-400 mb-1">Producer</label>
-                    <input required type="text" placeholder="e.g. Yarra Yering" value={wishlistForm.producer} onChange={e => setWishlistForm({...wishlistForm, producer: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                  </div>
-                  <div>
-                    <label className="block text-stone-400 mb-1">Varietal</label>
-                    <input required type="text" placeholder="e.g. Pinot Noir" value={wishlistForm.varietal} onChange={e => setWishlistForm({...wishlistForm, varietal: e.target.value})} className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-stone-100" />
-                  </div>
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button type="button" onClick={() => setShowWishlistModal(false)} className="px-3 py-1.5 bg-stone-700 text-stone-300 rounded">Cancel</button>
-                    <button type="submit" className="px-3 py-1.5 bg-sky-600 text-stone-950 font-bold rounded">Add Wishlist</button>
-                  </div>
-                </form>
-              </div>
-            </div>
-          )}
-
-          {/* 7-COLUMN CSV BULK IMPORT MODAL */}
-          {showCsvModal && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-xl w-full space-y-4 shadow-2xl max-h-[90vh] overflow-y-auto">
-                <div className="flex justify-between items-center">
-                  <h3 className="text-base font-bold text-purple-400">📥 7-Column CSV Bulk Import</h3>
-                  <button onClick={() => setShowCsvModal(false)} className="text-stone-400 hover:text-stone-200 font-bold">✕</button>
-                </div>
-
-                <div className="bg-stone-900/80 p-3 rounded-lg border border-stone-700/80 space-y-2 text-xs text-stone-300">
-                  <p>Provide 7 basic fields: <code className="text-amber-400 font-bold">producer, name, vintage, varietal, quantity, tier, costPriceAud</code>. Regions, Halliday/Vivino ratings, drink windows, and market values are automatically populated!</p>
-                  <button
-                    type="button"
-                    onClick={downloadCsvTemplate}
-                    className="bg-amber-600/80 hover:bg-amber-500 text-stone-950 font-bold px-3 py-1 rounded text-[11px] transition inline-block"
-                  >
-                    📄 Download 7-Column Template
-                  </button>
-                </div>
-
-                {/* File Upload Drop Area */}
-                <div className="border-2 border-dashed border-stone-600 hover:border-purple-500 rounded-xl p-6 text-center bg-stone-900/50 transition">
-                  <input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleCsvFileUpload}
-                    className="hidden"
-                    id="csvFileInput"
-                  />
-                  <label htmlFor="csvFileInput" className="cursor-pointer space-y-1 block">
-                    <div className="text-2xl">📁</div>
-                    <span className="text-xs font-bold text-purple-300 block">Click to select CSV File</span>
-                    <span className="text-[10px] text-stone-400 block">{csvFileName || "No file selected"}</span>
-                  </label>
-                </div>
-
-                {csvError && (
-                  <div className="p-2 bg-red-950/80 border border-red-700 text-red-300 rounded text-xs">
-                    ⚠️ {csvError}
-                  </div>
-                )}
-
-                {/* Parsed Preview Table */}
-                {csvParsedWines.length > 0 && (
-                  <div className="space-y-2">
-                    <span className="text-xs font-bold text-emerald-400 block">
-                      ✔ Preview: {csvParsedWines.length} Wine(s) Ready to Import
-                    </span>
-                    <div className="max-h-40 overflow-y-auto bg-stone-950 p-2 rounded border border-stone-800 text-[11px]">
-                      <table className="w-full text-left border-collapse">
-                        <thead>
-                          <tr className="border-b border-stone-800 text-stone-400">
-                            <th className="p-1">Vintage</th>
-                            <th className="p-1">Producer</th>
-                            <th className="p-1">Name</th>
-                            <th className="p-1">Tier</th>
-                            <th className="p-1">Cost</th>
-                            <th className="p-1">Auto Market</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {csvParsedWines.map((row, idx) => (
-                            <tr key={idx} className="border-b border-stone-900 text-stone-300">
-                              <td className="p-1 text-amber-500">{row.vintage}</td>
-                              <td className="p-1 font-bold">{row.producer}</td>
-                              <td className="p-1">{row.name}</td>
-                              <td className="p-1">{row.tier}</td>
-                              <td className="p-1 text-rose-400">${row.costPriceAud}</td>
-                              <td className="p-1 text-emerald-400">${row.priceAud}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setShowCsvModal(false)} className="px-3 py-1.5 bg-stone-700 text-stone-300 text-xs rounded">Cancel</button>
-                  <button
-                    type="button"
-                    disabled={csvParsedWines.length === 0}
-                    onClick={handleConfirmCsvImport}
-                    className="px-4 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-stone-700 disabled:text-stone-500 text-stone-100 font-bold text-xs rounded"
-                  >
-                    Import {csvParsedWines.length} Bottles
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TASTING NOTE MODAL */}
-          {selectedWineForTasting && (
-            <div className="fixed inset-0 bg-black/80 flex items-center justify-center p-4 z-50">
-              <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-md w-full space-y-3 shadow-2xl">
-                <h3 className="text-sm font-bold text-amber-400">Log Tasting Note</h3>
-                <p className="text-xs text-stone-300">{selectedWineForTasting.producer} - {selectedWineForTasting.name}</p>
-                <textarea
-                  rows="3"
-                  placeholder="Record sensory profile..."
-                  value={tastingNoteInput}
-                  onChange={(e) => setTastingNoteInput(e.target.value)}
-                  className="w-full bg-stone-900 border border-stone-700 rounded p-2 text-xs text-stone-100 focus:outline-none focus:border-amber-500"
-                ></textarea>
-                <div className="flex justify-end gap-2">
-                  <button onClick={() => setSelectedWineForTasting(null)} className="px-3 py-1.5 bg-stone-700 text-stone-300 text-xs rounded">Cancel</button>
-                  <button onClick={addTastingNote} className="px-3 py-1.5 bg-amber-600 text-stone-950 font-bold text-xs rounded">Save Note</button>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    ReactDOM.render(<WineApp />, document.getElementById('root'));
-  </script>
+        // Refresh icons whenever DOM updates
+        setTimeout(() => {
+            if (window.lucide) {
+                window.lucide.createIcons();
+            }
+        }, 300);
+    </script>
 </body>
 </html>
