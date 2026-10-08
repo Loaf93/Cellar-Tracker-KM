@@ -28,7 +28,8 @@
     }, 10000);
   </script>
 
-  <script type="text/babel">
+  <!-- data-presets="react": only JSX is compiled; everything else runs as modern JavaScript (all current browsers). -->
+  <script type="text/babel" data-presets="react">
     const { useState, useEffect, useRef, useMemo } = React;
 
     // ---------------------------------------------------------------------
@@ -41,6 +42,11 @@
     const STORAGE_KEY = 'kirans_cellar_wines_v2';
     const SNAPSHOT_KEY = 'kirans_cellar_snapshots';
     const META_KEY = 'kirans_cellar_meta';
+    const HISTORY_KEY = 'kirans_cellar_history';
+    const TOMBSTONE_KEY = 'kirans_cellar_tombstones';   // ids of deleted wines / log entries (so deletes sync)
+    const SYNC_KEY = 'kirans_cellar_sync';               // GitHub sync settings for THIS device (incl. token)
+    const SYNC_DEBOUNCE_MS = 3000;
+    const SYNC_POLL_MS = 30000;
     const PRE_MIGRATION_KEY = 'kirans_cellar_wines_v2_pre_v3_backup';
     const CORRUPT_KEY_PREFIX = 'kirans_cellar_unreadable_';
     const SCHEMA_VERSION = 3;
@@ -108,7 +114,8 @@
       set(key, value) {
         try { window.localStorage.setItem(key, value); return true; }
         catch (e) { console.error('Storage write failed', e); return false; }
-      }
+      },
+      remove(key) { try { window.localStorage.removeItem(key); } catch (e) { /* ignore */ } }
     };
     const readJson = (key, fallback) => {
       const raw = storage.get(key);
@@ -216,6 +223,7 @@
         isWishlist: toBool(w.isWishlist),
         notes: str(w.notes),
         styleNote: str(w.styleNote),
+        updatedAt: str(w.updatedAt),
         _v: SCHEMA_VERSION
       };
       out.priceAud = priceManual ? Math.max(0, numOr(w.priceAud, 0)) : calculateMarketPrice(costPriceAud, tier, hallidayScore);
@@ -286,6 +294,274 @@
     };
 
     const sumBottles = (list) => list.reduce((a, w) => a + (w.quantity || 0), 0);
+
+    // ---------------------------------------------------------------------
+    // WINE MOVEMENT HISTORY (bottles in / out of the cellar)
+    // ---------------------------------------------------------------------
+    const OUT_REASONS = ['Drunk', 'Gifted', 'Sold', 'Spoiled / corked', 'Correction', 'Deleted'];
+    const IN_REASONS = ['Purchased', 'Gift received', 'Added', 'Correction', 'Moved from wishlist', 'CSV import'];
+    const MERGEABLE_REASONS = new Set(['Drunk', 'Purchased']);
+    const cellarQty = (w) => (w && !w.isWishlist) ? (w.quantity || 0) : 0;
+
+    const makeEvent = (wine, change, balance, reason, at = new Date().toISOString()) => ({
+      id: newId(),
+      at,
+      wineId: wine.id,
+      producer: wine.producer,
+      name: wine.name,
+      vintage: wine.vintage,
+      varietal: wine.varietal,
+      region: wine.region,
+      tier: wine.tier,
+      change,
+      balance,
+      reason,
+      unitCost: wine.costPriceAud || 0,
+      unitValue: wine.priceAud || 0,
+      note: ''
+    });
+
+    // Compare two cellar states and describe every bottle movement between them.
+    // reason: a string, or { in: '...', out: '...' }.
+    const diffMovements = (prev, next, reason) => {
+      const prevById = new Map(prev.map(w => [w.id, w]));
+      const nextById = new Map(next.map(w => [w.id, w]));
+      const ids = new Set([...prevById.keys(), ...nextById.keys()]);
+      const at = new Date().toISOString();
+      const events = [];
+      ids.forEach(id => {
+        const before = cellarQty(prevById.get(id));
+        const after = cellarQty(nextById.get(id));
+        if (before === after) return;
+        const change = after - before;
+        const r = typeof reason === 'string' ? reason : (change > 0 ? reason.in : reason.out);
+        events.push(makeEvent(nextById.get(id) || prevById.get(id), change, after, r, at));
+      });
+      return events;
+    };
+
+    // Append events; rapid +/- taps on the same wine within 2 minutes become one line.
+    const appendEvents = (history, events) => {
+      const out = [...history];
+      events.forEach(ev => {
+        const last = out[out.length - 1];
+        if (last && last.wineId === ev.wineId && last.reason === ev.reason && MERGEABLE_REASONS.has(ev.reason) &&
+            Math.sign(last.change) === Math.sign(ev.change) && !last.note &&
+            (new Date(ev.at) - new Date(last.at)) < 120000) {
+          out[out.length - 1] = { ...last, change: last.change + ev.change, balance: ev.balance, at: ev.at };
+        } else {
+          out.push(ev);
+        }
+      });
+      return out;
+    };
+
+    const openingBalance = (wines) => {
+      const at = new Date().toISOString();
+      return wines.filter(w => cellarQty(w) > 0).map(w => makeEvent(w, cellarQty(w), cellarQty(w), 'Opening balance', at));
+    };
+
+    const sanitizeHistory = (list) => (Array.isArray(list) ? list : [])
+      .filter(e => e && typeof e === 'object' && e.at && Number.isFinite(Number(e.change)))
+      .map(e => ({ ...e, id: String(e.id || newId()), change: Number(e.change), balance: Number(e.balance) || 0, note: e.note ? String(e.note) : '' }));
+
+    const unionHistory = (a, b) => {
+      const seen = new Set();
+      return [...a, ...b].filter(e => (seen.has(e.id) ? false : (seen.add(e.id), true)))
+        .sort((x, y) => new Date(x.at) - new Date(y.at));
+    };
+
+    const HISTORY_COLUMNS = [
+      ['Date', e => localDate(new Date(e.at))],
+      ['Time', e => new Date(e.at).toLocaleTimeString('en-AU', { hour: '2-digit', minute: '2-digit', hour12: false })],
+      ['Direction', e => e.change > 0 ? 'IN' : 'OUT'],
+      ['Reason', e => e.reason],
+      ['Qty Change', e => e.change],
+      ['Balance After', e => e.balance],
+      ['Producer', e => e.producer],
+      ['Wine', e => e.name],
+      ['Vintage', e => e.vintage],
+      ['Varietal', e => e.varietal],
+      ['Region', e => e.region],
+      ['Tier', e => e.tier],
+      ['Unit Cost (AUD)', e => e.unitCost],
+      ['Line Cost (AUD)', e => Math.round(e.change * (e.unitCost || 0) * 100) / 100],
+      ['Unit Value (AUD)', e => e.unitValue],
+      ['Line Value (AUD)', e => Math.round(e.change * (e.unitValue || 0) * 100) / 100],
+      ['Note', e => e.note],
+      ['Wine ID', e => e.wineId],
+      ['Entry ID', e => e.id]
+    ];
+    // ---------------------------------------------------------------------
+    // GITHUB CLOUD SYNC (private repository, GitHub REST "contents" API)
+    // ---------------------------------------------------------------------
+    const parseRepo = (input) => {
+      const s = String(input || '').trim().replace(/\.git$/i, '').replace(/\/+$/, '');
+      const m = s.match(/github\.com[/:]([^/\s]+)\/([^/\s?#]+)/i) || s.match(/^([A-Za-z0-9-_.]+)\/([A-Za-z0-9-_.]+)$/);
+      return m ? { owner: m[1], repo: m[2] } : null;
+    };
+
+    const guessDeviceName = () => {
+      const ua = navigator.userAgent || '';
+      if (/iPhone/.test(ua)) return 'iPhone';
+      if (/iPad/.test(ua)) return 'iPad';
+      if (/Android/.test(ua)) return 'Android phone';
+      if (/Macintosh/.test(ua)) return 'Mac';
+      if (/Windows/.test(ua)) return 'Windows PC';
+      return 'Browser';
+    };
+
+    const utf8ToB64 = (str) => {
+      const bytes = new TextEncoder().encode(str);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+      return btoa(bin);
+    };
+    const b64ToUtf8 = (b64) => {
+      const bin = atob(String(b64).replace(/\s/g, ''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return new TextDecoder().decode(bytes);
+    };
+
+    class SyncError extends Error {
+      constructor(kind, message, status) { super(message); this.kind = kind; this.status = status; }
+    }
+
+    const ghRequest = async (cfg, method, path, body, accept) => {
+      const r = parseRepo(cfg.repo);
+      if (!r) throw new SyncError('config', 'Enter the repository as your-username/cellar-data.');
+      const headers = { 'Authorization': `Bearer ${String(cfg.token || '').trim()}`, 'Accept': accept || 'application/vnd.github+json' };
+      if (body) headers['Content-Type'] = 'application/json';
+      try {
+        return await fetch(`https://api.github.com/repos/${r.owner}/${r.repo}${path}`, {
+          method, headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined
+        });
+      } catch (e) {
+        throw new SyncError('offline', 'No connection to GitHub. Changes are kept on this device and will sync when you are back online.');
+      }
+    };
+
+    const errorFromResponse = async (res, ctx) => {
+      let msg = '';
+      try { msg = (await res.json()).message || ''; } catch (e) { /* no body */ }
+      if (res.status === 401) return new SyncError('auth', 'GitHub rejected the access token (wrong, expired or revoked). Create a new token and paste it into Cloud Sync.', 401);
+      if (res.status === 403 && /rate limit/i.test(msg)) return new SyncError('rate', 'GitHub is limiting requests for a few minutes. Sync will retry automatically.', 403);
+      if (res.status === 403) return new SyncError('perm', 'The token is not allowed to change this repository. It needs "Contents: Read and write" access to it.', 403);
+      if (res.status === 404 && ctx === 'repo') return new SyncError('notfound', 'Repository not found. Check the name, and that the token was given access to this repository.', 404);
+      return new SyncError('http', `GitHub error ${res.status}${msg ? ': ' + msg : ''}`, res.status);
+    };
+
+    const contentPath = (cfg, withRef) => {
+      const file = String(cfg.path || 'cellar.json').split('/').map(encodeURIComponent).join('/');
+      return `/contents/${file}${withRef && cfg.branch ? `?ref=${encodeURIComponent(cfg.branch)}` : ''}`;
+    };
+
+    const ghCheckRepo = async (cfg) => {
+      const res = await ghRequest(cfg, 'GET', '');
+      if (!res.ok) throw await errorFromResponse(res, 'repo');
+      const d = await res.json();
+      return { isPrivate: !!d.private, fullName: d.full_name };
+    };
+
+    const ghReadFile = async (cfg) => {
+      const res = await ghRequest(cfg, 'GET', contentPath(cfg, true));
+      if (res.status === 404) return null;
+      if (!res.ok) throw await errorFromResponse(res, 'file');
+      const meta = await res.json();
+      if (!meta.size) return { sha: meta.sha, data: null };
+      let text;
+      if (meta.encoding === 'base64' && meta.content) {
+        text = b64ToUtf8(meta.content);
+      } else {
+        const raw = await ghRequest(cfg, 'GET', contentPath(cfg, true), null, 'application/vnd.github.raw+json');
+        if (!raw.ok) throw await errorFromResponse(raw, 'file');
+        text = await raw.text();
+      }
+      try { return { sha: meta.sha, data: JSON.parse(text) }; }
+      catch (e) { throw new SyncError('corrupt', 'The cloud file could not be read (was it edited by hand?). Nothing was changed. Use "Replace cloud copy" to fix it.'); }
+    };
+
+    const ghWriteFile = async (cfg, doc, sha, message) => {
+      const body = { message, content: utf8ToB64(JSON.stringify(doc, null, 1)) };
+      if (sha) body.sha = sha;
+      if (cfg.branch) body.branch = cfg.branch;
+      const res = await ghRequest(cfg, 'PUT', contentPath(cfg, false), body);
+      if (res.status === 409 || res.status === 422) throw new SyncError('conflict', 'Another device saved at the same moment.', res.status);
+      if (!res.ok) throw await errorFromResponse(res, 'file');
+      const d = await res.json();
+      return d.content && d.content.sha;
+    };
+
+    const mergeTombstones = (a, b) => {
+      const m = new Map();
+      [...(a || []), ...(b || [])].forEach(t => {
+        if (!t || !t.id) return;
+        const prev = m.get(t.id);
+        if (!prev || String(t.at) > String(prev.at)) m.set(t.id, { id: String(t.id), at: String(t.at || '') });
+      });
+      return [...m.values()];
+    };
+
+    const parseRemoteDoc = (data) => ({
+      wines: normalizeList(data && data.wines),
+      history: sanitizeHistory(data && data.history),
+      tombstones: mergeTombstones([], data && Array.isArray(data.tombstones) ? data.tombstones : [])
+    });
+
+    // Merge two copies: newest edit of each wine wins; deletions win over older edits; logs are combined.
+    const mergeState = (local, remote) => {
+      const tombstones = mergeTombstones(local.tombstones, remote.tombstones);
+      const tomb = new Map(tombstones.map(t => [t.id, t.at]));
+      const alive = (w) => { const t = tomb.get(w.id); return !t || (w.updatedAt || '') > t; };
+      const remoteById = new Map(remote.wines.map(w => [w.id, w]));
+      const localIds = new Set(local.wines.map(w => w.id));
+      const wines = [];
+      remote.wines.forEach(w => { if (!localIds.has(w.id) && alive(w)) wines.push(w); });
+      local.wines.forEach(w => {
+        const r = remoteById.get(w.id);
+        const winner = r && (r.updatedAt || '') > (w.updatedAt || '') ? r : w;
+        if (alive(winner)) wines.push(winner);
+      });
+      const hMap = new Map();
+      [...local.history, ...remote.history].forEach(e => {
+        const prev = hMap.get(e.id);
+        if (!prev || (e.editedAt || e.at) > (prev.editedAt || prev.at)) hMap.set(e.id, e);
+      });
+      const history = [...hMap.values()].filter(e => !tomb.has(e.id))
+        .sort((x, y) => (x.at < y.at ? -1 : x.at > y.at ? 1 : 0));
+      return { wines, history, tombstones };
+    };
+
+    // Order-independent fingerprint, so two devices never "ping-pong" over list order.
+    const byId = (a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const canonEvent = (e) => [e.id, e.at, e.wineId, e.change, e.balance, e.reason, e.note || '', e.editedAt || '', e.producer, e.name, e.vintage, e.varietal, e.region, e.tier, e.unitCost, e.unitValue];
+    const canonical = (st) => JSON.stringify({
+      w: [...st.wines].sort(byId),
+      h: [...st.history].sort(byId).map(canonEvent),
+      t: [...st.tombstones].sort(byId).map(t => [t.id, t.at])
+    });
+
+    const buildRemoteDoc = (st, cfg) => ({
+      app: "Kiran's Cellar Tracker",
+      format: 'cellar-sync',
+      schemaVersion: SCHEMA_VERSION,
+      updatedAt: new Date().toISOString(),
+      updatedBy: cfg.deviceName || guessDeviceName(),
+      wines: st.wines,
+      history: st.history,
+      tombstones: st.tombstones
+    });
+
+    const syncCommitMessage = (st, cfg) => {
+      const bottles = sumBottles(st.wines.filter(w => !w.isWishlist));
+      return `Cellar update from ${cfg.deviceName || guessDeviceName()} — ${bottles} bottles, ${st.wines.length} entries`;
+    };
+
+    const historyToCsv = (events) => '﻿' + [
+      HISTORY_COLUMNS.map(c => c[0]).join(','),
+      ...events.map(e => HISTORY_COLUMNS.map(c => csvCell(c[1](e))).join(','))
+    ].join('\r\n');
 
     // ---------------------------------------------------------------------
     // SNAPSHOTS (automatic local restore points)
@@ -474,7 +750,8 @@
       const data = JSON.parse(text);
       const list = Array.isArray(data) ? data : (data && Array.isArray(data.wines) ? data.wines : null);
       if (!list) throw new Error('No wines found in this file.');
-      return { wines: normalizeList(list), exportedAt: (data && data.exportedAt) || null };
+      const history = (data && Array.isArray(data.history)) ? sanitizeHistory(data.history) : null;
+      return { wines: normalizeList(list), history, exportedAt: (data && data.exportedAt) || null };
     };
 
     // ---------------------------------------------------------------------
@@ -595,7 +872,7 @@
       });
     };
 
-    function WineFormModal({ title, initialForm, onSave, onClose, showDbSearch, saveLabel }) {
+    function WineFormModal({ title, initialForm, onSave, onClose, showDbSearch, saveLabel, wineHistory }) {
       const [form, setForm] = useState(initialForm);
       const [dbQuery, setDbQuery] = useState('');
       const results = useMemo(() => {
@@ -733,11 +1010,349 @@
                 <p className="text-[10px] text-stone-400 italic bg-stone-900/60 p-2 rounded border border-stone-700">Reference style note: {form.styleNote}</p>
               )}
 
+              {wineHistory && wineHistory.length > 0 && (
+                <div className="bg-stone-900/60 p-2 rounded border border-stone-700">
+                  <span className="block text-[10px] font-semibold text-stone-400 uppercase tracking-wider mb-1">Movement history</span>
+                  <div className="max-h-28 overflow-y-auto space-y-0.5">
+                    {[...wineHistory].reverse().map(e => (
+                      <div key={e.id} className="flex justify-between text-[10px] text-stone-300">
+                        <span>{fmtDateTime(e.at)} · {e.reason}{e.note ? ` — ${e.note}` : ''}</span>
+                        <span className={e.change > 0 ? 'text-emerald-400 font-bold' : 'text-rose-400 font-bold'}>{e.change > 0 ? '+' : ''}{e.change} → {e.balance}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="flex justify-end gap-2 pt-2">
                 <button type="button" onClick={onClose} className="px-3 py-1.5 bg-stone-700 text-stone-300 rounded">Cancel</button>
                 <button type="submit" className="px-3 py-1.5 bg-emerald-600 text-stone-950 font-bold rounded">{saveLabel || 'Save Wine'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------------------------------------------------------------
+    // ACTIONS DROPDOWN
+    // ---------------------------------------------------------------------
+    function ActionsMenu({ items }) {
+      const [open, setOpen] = useState(false);
+      const ref = useRef(null);
+      useEffect(() => {
+        if (!open) return;
+        const onDown = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
+        document.addEventListener('mousedown', onDown);
+        document.addEventListener('touchstart', onDown);
+        document.addEventListener('keydown', onKey);
+        return () => {
+          document.removeEventListener('mousedown', onDown);
+          document.removeEventListener('touchstart', onDown);
+          document.removeEventListener('keydown', onKey);
+        };
+      }, [open]);
+      return (
+        <div className="relative" ref={ref}>
+          <button type="button" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(o => !o)}
+            className={`font-bold px-3 py-1.5 rounded-lg text-xs transition shadow flex items-center gap-1 ${open ? 'bg-amber-400 text-stone-950' : 'bg-amber-600 hover:bg-amber-500 text-stone-950'}`}>
+            ⚙️ Actions <span className={`transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
+          </button>
+          {open && (
+            <div role="menu" className="absolute left-0 md:left-auto md:right-0 mt-1 w-64 bg-stone-800 border border-stone-600 rounded-lg shadow-2xl z-40 py-1">
+              {items.map(it => (
+                <button key={it.label} type="button" role="menuitem" onClick={() => { setOpen(false); it.onClick(); }}
+                  className="w-full text-left px-3 py-2 hover:bg-stone-700 flex items-start gap-2.5">
+                  <span className="text-base leading-5">{it.icon}</span>
+                  <span>
+                    <span className="block text-xs font-semibold text-stone-100">{it.label}</span>
+                    <span className="block text-[10px] text-stone-400">{it.hint}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ---------------------------------------------------------------------
+    // WINE HISTORY MODAL
+    // ---------------------------------------------------------------------
+    function HistoryModal({ history, onClose, onUpdateEvent, onDownload, canEdit }) {
+      const [query, setQuery] = useState('');
+      const [direction, setDirection] = useState('All');
+      const [year, setYear] = useState('All');
+      const [reason, setReason] = useState('All');
+
+      const years = useMemo(() => Array.from(new Set(history.map(e => new Date(e.at).getFullYear()))).sort((a, b) => b - a), [history]);
+      const reasons = useMemo(() => Array.from(new Set(history.map(e => e.reason))).sort(), [history]);
+
+      const filtered = useMemo(() => {
+        const q = query.trim().toLowerCase();
+        return history.filter(e => {
+          if (direction === 'In' && e.change <= 0) return false;
+          if (direction === 'Out' && e.change >= 0) return false;
+          if (year !== 'All' && new Date(e.at).getFullYear() !== Number(year)) return false;
+          if (reason !== 'All' && e.reason !== reason) return false;
+          if (q && ![e.producer, e.name, e.vintage, e.varietal, e.note, e.reason].some(x => String(x || '').toLowerCase().includes(q))) return false;
+          return true;
+        });
+      }, [history, query, direction, year, reason]);
+
+      const bottlesIn = filtered.reduce((a, e) => a + (e.change > 0 ? e.change : 0), 0);
+      const bottlesOut = filtered.reduce((a, e) => a + (e.change < 0 ? -e.change : 0), 0);
+      const outByReason = {};
+      filtered.forEach(e => { if (e.change < 0) outByReason[e.reason] = (outByReason[e.reason] || 0) - e.change; });
+      const spendIn = filtered.reduce((a, e) => a + (e.change > 0 && e.reason !== 'Opening balance' ? e.change * (e.unitCost || 0) : 0), 0);
+      const isFiltered = query || direction !== 'All' || year !== 'All' || reason !== 'All';
+      const selCls = "bg-stone-900 border border-stone-700 rounded-lg px-2 py-1.5 text-xs text-stone-100 focus:outline-none focus:border-amber-500";
+
+      return (
+        <div className="fixed inset-0 bg-black/80 flex items-start md:items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-4xl w-full space-y-3 shadow-2xl my-8">
+            <div className="flex justify-between items-center">
+              <h3 className="text-base font-bold text-amber-400">📜 Wine History — bottles in & out</h3>
+              <button onClick={onClose} className="text-stone-400 hover:text-stone-200 font-bold">✕</button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center">
+              <div className="bg-emerald-950/50 border border-emerald-800/60 rounded p-2">
+                <span className="block text-lg font-bold text-emerald-300">{bottlesIn}</span>
+                <span className="text-[10px] text-emerald-400">bottles in</span>
+              </div>
+              <div className="bg-rose-950/50 border border-rose-800/60 rounded p-2">
+                <span className="block text-lg font-bold text-rose-300">{bottlesOut}</span>
+                <span className="text-[10px] text-rose-400">bottles out</span>
+              </div>
+              <div className="bg-stone-900/80 border border-stone-700 rounded p-2">
+                <span className="block text-lg font-bold text-stone-200">{fmtMoney(spendIn)}</span>
+                <span className="text-[10px] text-stone-400">cost of bottles in (excl. opening)</span>
+              </div>
+              <div className="bg-stone-900/80 border border-stone-700 rounded p-2 text-[10px] text-stone-300 flex flex-col justify-center">
+                {Object.keys(outByReason).length === 0 ? <span className="text-stone-500">No bottles out</span> :
+                  Object.entries(outByReason).map(([r, n]) => <span key={r}>{r}: <strong>{n}</strong></span>)}
+              </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row gap-2">
+              <input type="text" placeholder="Search wine, note, reason..." value={query} onChange={e => setQuery(e.target.value)} className={`${selCls} flex-1`} />
+              <select value={direction} onChange={e => setDirection(e.target.value)} className={selCls}>
+                <option value="All">In & Out</option><option value="In">In only</option><option value="Out">Out only</option>
+              </select>
+              <select value={year} onChange={e => setYear(e.target.value)} className={selCls}>
+                <option value="All">All years</option>
+                {years.map(y => <option key={y} value={y}>{y}</option>)}
+              </select>
+              <select value={reason} onChange={e => setReason(e.target.value)} className={selCls}>
+                <option value="All">All reasons</option>
+                {reasons.map(r => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => onDownload(history, 'all')} className="bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded text-xs">⬇️ Download full history (Excel .csv)</button>
+              {isFiltered && (
+                <button onClick={() => onDownload(filtered, 'filtered')} className="bg-stone-700 hover:bg-stone-600 text-stone-100 font-semibold px-3 py-1.5 rounded text-xs">⬇️ Download these {filtered.length} rows</button>
+              )}
+            </div>
+
+            <div className="max-h-[50vh] overflow-auto bg-stone-950 rounded border border-stone-800">
+              {filtered.length === 0 ? (
+                <p className="text-xs text-stone-500 p-4 text-center">No movements {isFiltered ? 'match these filters' : 'recorded yet'}.</p>
+              ) : (
+                <table className="w-full text-left border-collapse text-[11px]">
+                  <thead className="sticky top-0 bg-stone-900">
+                    <tr className="text-stone-400 border-b border-stone-800">
+                      <th className="p-1.5">Date</th><th className="p-1.5">Wine</th><th className="p-1.5 text-right">Qty</th>
+                      <th className="p-1.5 text-right">Bal.</th><th className="p-1.5">Reason</th><th className="p-1.5">Note</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...filtered].reverse().map(e => {
+                      const options = e.change > 0 ? IN_REASONS : OUT_REASONS;
+                      const editable = canEdit && e.reason !== 'Opening balance';
+                      return (
+                        <tr key={e.id} className="border-b border-stone-900 text-stone-300 align-top">
+                          <td className="p-1.5 whitespace-nowrap text-stone-400">{fmtDateTime(e.at)}</td>
+                          <td className="p-1.5"><span className="text-amber-500">{e.vintage}</span> <strong>{e.producer}</strong> {e.name}</td>
+                          <td className={`p-1.5 text-right font-bold ${e.change > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>{e.change > 0 ? '+' : ''}{e.change}</td>
+                          <td className="p-1.5 text-right">{e.balance}</td>
+                          <td className="p-1.5">
+                            {editable ? (
+                              <select value={e.reason} onChange={ev => onUpdateEvent(e.id, { reason: ev.target.value })}
+                                className="bg-stone-900 border border-stone-700 rounded px-1 py-0.5 text-[11px] text-stone-200">
+                                {(options.includes(e.reason) ? options : [e.reason, ...options]).map(r => <option key={r} value={r}>{r}</option>)}
+                              </select>
+                            ) : e.reason}
+                          </td>
+                          <td className="p-1.5 min-w-[8rem]">
+                            {canEdit ? (
+                              <input type="text" defaultValue={e.note} placeholder="add note"
+                                onBlur={ev => { if (ev.target.value !== e.note) onUpdateEvent(e.id, { note: ev.target.value }); }}
+                                className="w-full bg-transparent border-b border-stone-800 focus:border-amber-500 focus:outline-none text-[11px] text-stone-200 placeholder-stone-600" />
+                            ) : e.note}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <p className="text-[10px] text-stone-500">
+              Every change to bottle quantities is recorded automatically. Tapping − is logged as "Drunk" and + as "Purchased" — change the reason or add a note here. The download opens directly in Excel (one row per movement; Qty Change is negative for bottles out, so it sums cleanly in a pivot table).
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    // ---------------------------------------------------------------------
+    // CLOUD SYNC SETTINGS MODAL
+    // ---------------------------------------------------------------------
+    const syncStatusLabel = (st) => {
+      if (st.state === 'syncing') return '☁️ Syncing…';
+      if (st.state === 'pending') return '☁️ Saving…';
+      if (st.state === 'synced') return `☁️ Synced${st.at ? ' ' + new Date(st.at).toLocaleTimeString('en-AU', { hour: 'numeric', minute: '2-digit' }) : ''}`;
+      if (st.state === 'offline') return '☁️ Offline — will sync';
+      if (st.state === 'error') return '⚠️ Sync problem';
+      return '☁️ Sync off';
+    };
+
+    function SyncModal({ cfg, status, choice, localSummary, onConnect, onChoose, onCancelChoice, onSyncNow, onDisconnect, onRename, onClose }) {
+      const [repo, setRepo] = useState(cfg ? cfg.repo : '');
+      const [token, setToken] = useState('');
+      const [deviceName, setDeviceName] = useState(cfg ? cfg.deviceName : guessDeviceName());
+      const [branch, setBranch] = useState(cfg ? (cfg.branch || '') : '');
+      const [path, setPath] = useState(cfg ? (cfg.path || 'cellar.json') : 'cellar.json');
+      const [busy, setBusy] = useState(false);
+      const [error, setError] = useState('');
+      const linked = !!(cfg && cfg.linkedAt);
+
+      const connect = async (e) => {
+        e.preventDefault();
+        setError('');
+        if (!parseRepo(repo)) { setError('Enter the repository as your-username/cellar-data (or paste its GitHub address).'); return; }
+        if (!token.trim()) { setError('Paste your access token.'); return; }
+        setBusy(true);
+        try { await onConnect({ repo: repo.trim(), token: token.trim(), deviceName: deviceName.trim() || guessDeviceName(), branch: branch.trim(), path: path.trim() || 'cellar.json' }); }
+        catch (err) { setError(err.message || String(err)); }
+        finally { setBusy(false); }
+      };
+      const choose = async (c) => {
+        setError(''); setBusy(true);
+        try { await onChoose(c); } catch (err) { setError(err.message || String(err)); } finally { setBusy(false); }
+      };
+
+      const box = "bg-stone-900/80 p-3 rounded-lg border border-stone-700 space-y-2 text-xs";
+      return (
+        <div className="fixed inset-0 bg-black/80 flex items-start md:items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-stone-800 border border-stone-700 rounded-xl p-5 max-w-xl w-full space-y-4 shadow-2xl my-8">
+            <div className="flex justify-between items-center">
+              <h3 className="text-base font-bold text-sky-300">☁️ Cloud Sync (GitHub)</h3>
+              <button onClick={onClose} className="text-stone-400 hover:text-stone-200 font-bold">✕</button>
+            </div>
+
+            {linked && !choice && (
+              <section className={box}>
+                <div className="flex flex-wrap justify-between items-center gap-2">
+                  <div>
+                    <span className="block font-bold text-stone-100">{syncStatusLabel(status)}</span>
+                    <span className="block text-[10px] text-stone-400">Repository: {cfg.repo}{cfg.path && cfg.path !== 'cellar.json' ? ` · ${cfg.path}` : ''} · this device: {cfg.deviceName}</span>
+                  </div>
+                  <button onClick={onSyncNow} className="bg-sky-600 hover:bg-sky-500 text-stone-950 font-bold px-3 py-1.5 rounded">Sync now</button>
+                </div>
+                {status.state === 'error' && <div className="p-2 bg-red-950/80 border border-red-700 text-red-200 rounded">⚠️ {status.message}</div>}
+                {status.state === 'offline' && <div className="p-2 bg-amber-950/60 border border-amber-700/60 text-amber-100 rounded">{status.message}</div>}
+                <p className="text-[10px] text-stone-400">Changes upload about 3 seconds after you make them. Other devices pick them up when the tracker is opened or brought back to the screen, and every 30 seconds while it's open. Every save is a dated version in your repository's commit history.</p>
+                <div className="flex flex-wrap gap-2 items-center">
+                  <label className="text-[10px] text-stone-400">Device name</label>
+                  <input type="text" defaultValue={cfg.deviceName} onBlur={e => e.target.value.trim() && onRename(e.target.value.trim())}
+                    className="bg-stone-950 border border-stone-700 rounded px-2 py-1 text-xs text-stone-100 w-40" />
+                  <ConfirmButton onConfirm={onDisconnect} className="ml-auto bg-stone-700 hover:bg-stone-600 text-stone-200 px-3 py-1.5 rounded" confirmLabel="Tap again to disconnect">
+                    Disconnect this device
+                  </ConfirmButton>
+                </div>
+                <p className="text-[10px] text-stone-500">Disconnecting removes the token from this browser only. Your cellar stays on this device and in GitHub. To update an expired token, disconnect and connect again.</p>
+              </section>
+            )}
+
+            {choice && (
+              <section className={box}>
+                <h4 className="font-bold text-amber-300">This device and the cloud both have a cellar. Which should be used?</h4>
+                <div className="grid grid-cols-2 gap-2 text-[11px]">
+                  <div className="bg-stone-950 border border-stone-700 rounded p-2">
+                    <span className="block font-bold text-sky-300">Cloud copy</span>
+                    {choice.summary.entries} entries · {choice.summary.bottles} bottles · {choice.summary.history} log rows
+                    {choice.summary.updatedBy && <span className="block text-stone-500">last saved by {choice.summary.updatedBy}{choice.summary.updatedAt ? `, ${fmtDateTime(choice.summary.updatedAt)}` : ''}</span>}
+                  </div>
+                  <div className="bg-stone-950 border border-stone-700 rounded p-2">
+                    <span className="block font-bold text-emerald-300">This device</span>
+                    {localSummary.entries} entries · {localSummary.bottles} bottles · {localSummary.history} log rows
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <button disabled={busy} onClick={() => choose('cloud')} className="w-full text-left bg-sky-700 hover:bg-sky-600 disabled:opacity-50 text-stone-100 px-3 py-2 rounded">
+                    <strong>Use the cloud copy on this device</strong> <span className="text-[10px] opacity-80">(recommended for a second device — this device's copy is kept as a restore point)</span>
+                  </button>
+                  <button disabled={busy} onClick={() => choose('merge')} className="w-full text-left bg-stone-700 hover:bg-stone-600 disabled:opacity-50 text-stone-100 px-3 py-2 rounded">
+                    <strong>Combine both</strong> <span className="text-[10px] opacity-80">(only if each device has different wines — the same wine entered on both will appear twice)</span>
+                  </button>
+                  <ConfirmButton onConfirm={() => choose('upload')} className="w-full text-left bg-rose-800 hover:bg-rose-700 text-stone-100 px-3 py-2 rounded" confirmLabel="Tap again — the cloud copy will be replaced (older versions stay in GitHub history)">
+                    <strong>Replace the cloud copy with this device</strong>
+                  </ConfirmButton>
+                  <button onClick={onCancelChoice} className="text-[11px] text-stone-400 underline">Cancel</button>
+                </div>
+              </section>
+            )}
+
+            {!linked && !choice && (
+              <>
+                <section className={box}>
+                  <h4 className="font-bold text-stone-100">Before you start (one-off, on GitHub)</h4>
+                  <ol className="list-decimal ml-4 space-y-1 text-stone-300">
+                    <li>Create a <strong>private</strong> repository, e.g. <code>cellar-data</code>, and tick "Add a README file". <a className="text-sky-400 underline" href="https://github.com/new" target="_blank" rel="noopener">github.com/new</a></li>
+                    <li>Create a <strong>fine-grained token</strong>: Repository access → Only select repositories → <code>cellar-data</code>; Permissions → Contents → <strong>Read and write</strong>. <a className="text-sky-400 underline" href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create token</a></li>
+                    <li>Copy the token (starts with <code>github_pat_</code>) and paste it below.</li>
+                  </ol>
+                </section>
+                <form onSubmit={connect} className={box}>
+                  <div>
+                    <label className="block text-stone-400 mb-1">Repository</label>
+                    <input type="text" value={repo} onChange={e => setRepo(e.target.value)} placeholder="your-username/cellar-data" autoCapitalize="off" autoCorrect="off" spellCheck="false" className={inputCls} />
+                  </div>
+                  <div>
+                    <label className="block text-stone-400 mb-1">Access token</label>
+                    <input type="password" value={token} onChange={e => setToken(e.target.value)} placeholder="github_pat_…" autoComplete="off" autoCapitalize="off" spellCheck="false" className={inputCls} />
+                    <span className="block text-[10px] text-stone-500 mt-1">Saved in this browser only. Never included in backups or share links.</span>
+                  </div>
+                  <div>
+                    <label className="block text-stone-400 mb-1">Name for this device</label>
+                    <input type="text" value={deviceName} onChange={e => setDeviceName(e.target.value)} className={inputCls} />
+                  </div>
+                  <details className="text-[11px] text-stone-400">
+                    <summary className="cursor-pointer">Advanced</summary>
+                    <div className="grid grid-cols-2 gap-2 mt-2">
+                      <div>
+                        <label className="block mb-1">Branch (blank = default)</label>
+                        <input type="text" value={branch} onChange={e => setBranch(e.target.value)} className={inputCls} />
+                      </div>
+                      <div>
+                        <label className="block mb-1">File name</label>
+                        <input type="text" value={path} onChange={e => setPath(e.target.value)} className={inputCls} />
+                      </div>
+                    </div>
+                  </details>
+                  <button type="submit" disabled={busy} className="bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-stone-950 font-bold px-4 py-2 rounded">
+                    {busy ? 'Connecting…' : 'Connect'}
+                  </button>
+                </form>
+              </>
+            )}
+
+            {error && <div className="p-2 bg-red-950/80 border border-red-700 text-red-200 rounded text-xs">⚠️ {error}</div>}
           </div>
         </div>
       );
@@ -787,7 +1402,6 @@
       const [activeTab, setActiveTab] = useState('cellar');
       const [shareSuccess, setShareSuccess] = useState(false);
       const [shareFallbackUrl, setShareFallbackUrl] = useState('');
-      const [refreshSuccess, setRefreshSuccess] = useState(false);
 
       const [searchQuery, setSearchQuery] = useState('');
       const [selectedVarietal, setSelectedVarietal] = useState('All');
@@ -811,11 +1425,90 @@
 
       const [wishlistForm, setWishlistForm] = useState({ vintage: String(CURRENT_YEAR - 2), producer: '', varietal: '', name: '' });
 
+      // --- Movement history state (stored separately, in the background) ---
+      const loadHistoryFor = (cellar) => {
+        const raw = storage.get(HISTORY_KEY);
+        if (raw != null) {
+          try {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) return { history: sanitizeHistory(parsed), fresh: false };
+          } catch (e) { /* fall through */ }
+          storage.set(CORRUPT_KEY_PREFIX + 'history_' + Date.now(), raw);
+        }
+        return { history: openingBalance(cellar), fresh: true };
+      };
+      const [history, setHistory] = useState(() => (boot.readOnly || boot.saveBlocked) ? [] : loadHistoryFor(boot.wines).history);
+      const [showHistoryModal, setShowHistoryModal] = useState(false);
+
       const lastSavedRef = useRef(boot.readOnly ? null : storage.get(STORAGE_KEY));
+      const lastSavedHistoryRef = useRef(boot.readOnly ? null : storage.get(HISTORY_KEY));
       const readOnlyRef = useRef(isReadOnly);
       readOnlyRef.current = isReadOnly;
+      const winesRef = useRef(wines);
+      winesRef.current = wines;
+      const historyRef = useRef(history);
+      historyRef.current = history;
+      const saveBlockedRef = useRef(saveBlocked);
+      saveBlockedRef.current = saveBlocked;
 
-      // --- Save to browser storage whenever wines change -----------------
+      // Deleted wines / log rows are remembered (as "tombstones") so deletions also sync to other devices.
+      const [tombstones, setTombstones] = useState(() => { const t = readJson(TOMBSTONE_KEY, []); return Array.isArray(t) ? t : []; });
+      const tombstonesRef = useRef(tombstones);
+      tombstonesRef.current = tombstones;
+      const lastSavedTombRef = useRef(storage.get(TOMBSTONE_KEY));
+      const addTombstones = (ids) => {
+        if (!ids.length) return;
+        const at = new Date().toISOString();
+        const next = mergeTombstones(tombstonesRef.current, ids.map(id => ({ id, at })));
+        tombstonesRef.current = next;
+        setTombstones(next);
+      };
+
+      // --- Cloud sync state ----------------------------------------------
+      const [syncCfg, setSyncCfg] = useState(() => readJson(SYNC_KEY, null));
+      const [syncStatus, setSyncStatus] = useState({ state: 'off', message: '', at: null });
+      const [showSyncModal, setShowSyncModal] = useState(false);
+      const [syncChoice, setSyncChoice] = useState(null);
+      const syncCfgRef = useRef(syncCfg);
+      syncCfgRef.current = syncCfg;
+      const syncingRef = useRef(false);
+      const resyncRef = useRef(false);
+      const lastSyncedCanonRef = useRef(null);
+      const lastSyncStartRef = useRef(0);
+      const syncLinked = !!(syncCfg && syncCfg.linkedAt && syncCfg.token);
+
+      // Every change to the cellar goes through commit(), which also logs bottle movements,
+      // time-stamps edited wines and records deletions (both needed for syncing).
+      const commit = (updater, reason, opts = {}) => {
+        const prev = winesRef.current;
+        let next = typeof updater === 'function' ? updater(prev) : updater;
+        if (next === prev) return [];
+        const now = new Date().toISOString();
+        const prevById = new Map(prev.map(w => [w.id, w]));
+        next = next.map(w => {
+          const p = prevById.get(w.id);
+          if (p === w) return w;
+          if (p && JSON.stringify({ ...p, updatedAt: '' }) === JSON.stringify({ ...w, updatedAt: '' })) return w.updatedAt === p.updatedAt ? w : { ...w, updatedAt: p.updatedAt };
+          return { ...w, updatedAt: now };
+        });
+        const nextIds = new Set(next.map(w => w.id));
+        addTombstones(prev.filter(w => !nextIds.has(w.id)).map(w => w.id));
+        winesRef.current = next;
+        setWines(next);
+        if (readOnlyRef.current || opts.noLog || !reason) return [];
+        const events = diffMovements(prev, next, reason);
+        if (events.length) setHistory(h => appendEvents(h, events));
+        return events;
+      };
+
+      const replaceHistory = (next) => {
+        const keep = new Set(next.map(e => e.id));
+        addTombstones(historyRef.current.filter(e => !keep.has(e.id)).map(e => e.id));
+        historyRef.current = next;
+        setHistory(next);
+      };
+
+      // --- Save to browser storage whenever wines / history change --------
       useEffect(() => {
         if (isReadOnly || saveBlocked) return;
         const json = JSON.stringify(wines);
@@ -824,6 +1517,22 @@
         if (ok) lastSavedRef.current = json;
         setSaveError(!ok);
       }, [wines, isReadOnly, saveBlocked]);
+
+      useEffect(() => {
+        if (isReadOnly || saveBlocked) return;
+        const json = JSON.stringify(history);
+        if (json === lastSavedHistoryRef.current) return;
+        const ok = storage.set(HISTORY_KEY, json);
+        if (ok) lastSavedHistoryRef.current = json;
+        else setSaveError(true);
+      }, [history, isReadOnly, saveBlocked]);
+
+      useEffect(() => {
+        if (isReadOnly || saveBlocked) return;
+        const json = JSON.stringify(tombstones);
+        if (json === lastSavedTombRef.current) return;
+        if (storage.set(TOMBSTONE_KEY, json)) lastSavedTombRef.current = json;
+      }, [tombstones, isReadOnly, saveBlocked]);
 
       // --- Restore point on first load each day (and after an upgrade) ---
       useEffect(() => {
@@ -849,13 +1558,26 @@
       // --- Keep multiple open tabs in sync (prevents one tab overwriting another)
       useEffect(() => {
         const onStorage = (e) => {
-          if (e.key !== STORAGE_KEY || e.newValue == null || readOnlyRef.current) return;
+          if (e.newValue == null || readOnlyRef.current) return;
           try {
             const parsed = JSON.parse(e.newValue);
             if (!Array.isArray(parsed)) return;
-            const normalized = normalizeList(parsed);
-            lastSavedRef.current = JSON.stringify(normalized);
-            setWines(normalized);
+            if (e.key === STORAGE_KEY) {
+              const normalized = normalizeList(parsed);
+              lastSavedRef.current = JSON.stringify(normalized);
+              winesRef.current = normalized;
+              setWines(normalized);
+            } else if (e.key === HISTORY_KEY) {
+              const h = sanitizeHistory(parsed);
+              lastSavedHistoryRef.current = JSON.stringify(h);
+              historyRef.current = h;
+              setHistory(h);
+            } else if (e.key === TOMBSTONE_KEY) {
+              const t = mergeTombstones([], parsed);
+              lastSavedTombRef.current = JSON.stringify(t);
+              tombstonesRef.current = t;
+              setTombstones(t);
+            }
           } catch (err) { /* ignore unreadable external writes */ }
         };
         window.addEventListener('storage', onStorage);
@@ -869,51 +1591,188 @@
         return () => clearTimeout(t);
       }, [toast]);
 
+      // --- Cloud sync -------------------------------------------------------
+      const saveSyncCfg = (next) => {
+        syncCfgRef.current = next;
+        setSyncCfg(next);
+        if (next) storage.set(SYNC_KEY, JSON.stringify(next)); else storage.remove(SYNC_KEY);
+      };
+
+      const applyState = (st) => {
+        winesRef.current = st.wines; setWines(st.wines);
+        historyRef.current = st.history; setHistory(st.history);
+        tombstonesRef.current = st.tombstones; setTombstones(st.tombstones);
+      };
+
+      const localState = () => ({ wines: winesRef.current, history: historyRef.current, tombstones: tombstonesRef.current });
+
+      const syncNow = async (why = 'auto') => {
+        const cfg = syncCfgRef.current;
+        if (!cfg || !cfg.linkedAt || !cfg.token || readOnlyRef.current || saveBlockedRef.current) return;
+        if (syncingRef.current) { resyncRef.current = true; return; }
+        const sinceLast = Date.now() - lastSyncStartRef.current;
+        if ((why === 'poll' || why === 'focus') && sinceLast < 2000) { setTimeout(() => syncNow('queued'), 2000 - sinceLast); return; }
+        syncingRef.current = true;
+        lastSyncStartRef.current = Date.now();
+        setSyncStatus(s => ({ ...s, state: 'syncing' }));
+        try {
+          let done = false;
+          for (let attempt = 0; attempt < 4 && !done; attempt++) {
+            const file = await ghReadFile(cfg);
+            const remote = file && file.data ? parseRemoteDoc(file.data) : null;
+            const local = localState();
+            const merged = remote ? mergeState(local, remote) : local;
+            const mergedCanon = canonical(merged);
+            if (mergedCanon !== canonical(local)) applyState(merged);
+            if (!remote || mergedCanon !== canonical(remote)) {
+              try { await ghWriteFile(cfg, buildRemoteDoc(merged, cfg), file && file.sha, syncCommitMessage(merged, cfg)); }
+              catch (err) { if (err.kind === 'conflict') continue; throw err; }
+            }
+            lastSyncedCanonRef.current = mergedCanon;
+            done = true;
+          }
+          if (!done) throw new SyncError('conflict', 'Another device kept saving at the same time. Will try again shortly.');
+          setSyncStatus({ state: 'synced', message: '', at: new Date().toISOString() });
+        } catch (err) {
+          console.warn('Sync failed', err);
+          setSyncStatus(s => ({ state: err.kind === 'offline' ? 'offline' : 'error', message: err.message || String(err), at: s.at }));
+        } finally {
+          syncingRef.current = false;
+          if (resyncRef.current) { resyncRef.current = false; setTimeout(() => syncNow('queued'), 300); }
+        }
+      };
+
+      // First connection on this device.
+      const connectSync = async (form) => {
+        const cfg = { ...form };
+        const repoInfo = await ghCheckRepo(cfg);
+        if (!repoInfo.isPrivate) throw new SyncError('public', `"${repoInfo.fullName}" is a PUBLIC repository — anyone could read your cellar. Make it private (repository Settings → Danger Zone → Change visibility) or create a new private one, then connect again.`);
+        const file = await ghReadFile(cfg);
+        const remote = file && file.data ? parseRemoteDoc(file.data) : null;
+        const local = localState();
+        const localEmpty = local.wines.length === 0 && local.history.length === 0;
+        if (remote && !localEmpty && canonical(mergeState(local, remote)) !== canonical(remote) && canonical(mergeState(local, remote)) !== canonical(local)) {
+          setSyncChoice({
+            cfg, file, remote,
+            summary: {
+              entries: remote.wines.length,
+              bottles: sumBottles(remote.wines.filter(w => !w.isWishlist)),
+              history: remote.history.length,
+              updatedBy: file.data.updatedBy, updatedAt: file.data.updatedAt
+            }
+          });
+          return;
+        }
+        await finishLink(remote ? (localEmpty ? 'cloud' : 'merge') : 'upload', cfg, file, remote);
+      };
+
+      const finishLink = async (mode, cfg, file, remote) => {
+        if (mode === 'cloud') {
+          takeSnapshot('Before switching to the cloud copy');
+          applyState(remote);
+        } else if (mode === 'merge') {
+          applyState(mergeState(localState(), remote));
+        } else if (mode === 'upload') {
+          const st = localState();
+          await ghWriteFile(cfg, buildRemoteDoc(st, cfg), file && file.sha, `Cellar uploaded from ${cfg.deviceName}`);
+          lastSyncedCanonRef.current = canonical(st);
+        }
+        setSyncChoice(null);
+        saveSyncCfg({ ...cfg, linkedAt: new Date().toISOString() });
+        setSyncStatus({ state: 'synced', message: '', at: new Date().toISOString() });
+        setToast({ text: mode === 'cloud' ? 'Connected — this device now shows the cloud cellar.' : 'Connected — your cellar is syncing to GitHub.' });
+      };
+
+      const chooseSyncMode = (mode) => {
+        const c = syncChoice;
+        if (!c) return Promise.resolve();
+        return finishLink(mode, c.cfg, c.file, c.remote);
+      };
+
+      const disconnectSync = () => {
+        saveSyncCfg(null);
+        lastSyncedCanonRef.current = null;
+        setSyncStatus({ state: 'off', message: '', at: null });
+        setToast({ text: 'Cloud sync turned off on this device. Your cellar is still here and in GitHub.' });
+      };
+
+      // Sync on start, when the page comes back into view, when back online, and every 30 s while visible.
+      useEffect(() => {
+        if (!syncLinked || isReadOnly || saveBlocked) return;
+        syncNow('start');
+        const onVisible = () => { if (document.visibilityState === 'visible') syncNow('focus'); };
+        const onOnline = () => syncNow('online');
+        document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('focus', onVisible);
+        window.addEventListener('online', onOnline);
+        const iv = setInterval(() => { if (document.visibilityState === 'visible') syncNow('poll'); }, SYNC_POLL_MS);
+        return () => {
+          document.removeEventListener('visibilitychange', onVisible);
+          window.removeEventListener('focus', onVisible);
+          window.removeEventListener('online', onOnline);
+          clearInterval(iv);
+        };
+      }, [syncLinked, syncCfg && syncCfg.repo, syncCfg && syncCfg.token, syncCfg && syncCfg.path, syncCfg && syncCfg.branch, isReadOnly, saveBlocked]);
+
+      // Upload local changes ~3 s after they happen.
+      useEffect(() => {
+        if (!syncLinked || isReadOnly || saveBlocked || lastSyncedCanonRef.current === null) return;
+        if (canonical({ wines, history, tombstones }) === lastSyncedCanonRef.current) return;
+        setSyncStatus(s => (s.state === 'syncing' ? s : { ...s, state: 'pending' }));
+        const t = setTimeout(() => syncNow('change'), SYNC_DEBOUNCE_MS);
+        return () => clearTimeout(t);
+      }, [wines, history, tombstones, syncLinked, isReadOnly, saveBlocked]);
+
       const saveMeta = (patch) => {
         const next = { ...meta, ...patch };
         setMeta(next);
         storage.set(META_KEY, JSON.stringify(next));
       };
 
-      const takeSnapshot = (label, list = wines) => setSnapshots(addSnapshot(list, label));
+      const takeSnapshot = (label, list = winesRef.current) => setSnapshots(addSnapshot(list, label));
 
       // --- Basic actions -------------------------------------------------
       const updateQuantity = (id, delta) => {
         if (isReadOnly) return;
-        setWines(prev => prev.map(w => w.id === id ? { ...w, quantity: Math.max(0, w.quantity + delta) } : w));
+        commit(prev => prev.map(w => w.id === id ? { ...w, quantity: Math.max(0, w.quantity + delta) } : w), { in: 'Purchased', out: 'Drunk' });
       };
 
       const deleteWine = (id) => {
         if (isReadOnly) return;
-        const index = wines.findIndex(w => w.id === id);
+        const current = winesRef.current;
+        const index = current.findIndex(w => w.id === id);
         if (index === -1) return;
-        const removed = wines[index];
-        setWines(prev => prev.filter(w => w.id !== id));
+        const removed = current[index];
+        const events = commit(prev => prev.filter(w => w.id !== id), 'Deleted');
+        const eventIds = new Set(events.map(e => e.id));
         setToast({
           text: `Deleted ${removed.producer} ${removed.name}`,
-          undo: () => setWines(prev => {
-            if (prev.some(w => w.id === removed.id)) return prev;
-            const next = [...prev];
-            next.splice(Math.min(index, next.length), 0, removed);
-            return next;
-          })
+          undo: () => {
+            commit(prev => {
+              if (prev.some(w => w.id === removed.id)) return prev;
+              const next = [...prev];
+              next.splice(Math.min(index, next.length), 0, removed);
+              return next;
+            }, null, { noLog: true });
+            if (eventIds.size) { setHistory(h => h.filter(e => !eventIds.has(e.id))); addTombstones([...eventIds]); }
+          }
         });
       };
 
       const moveToCellar = (id) => {
         if (isReadOnly) return;
-        setWines(prev => prev.map(w => w.id === id ? { ...w, isWishlist: false, quantity: Math.max(1, w.quantity) } : w));
+        commit(prev => prev.map(w => w.id === id ? { ...w, isWishlist: false, quantity: Math.max(1, w.quantity) } : w), 'Moved from wishlist');
       };
 
       const handleSaveNewWine = (form) => {
         const created = formToWine(form);
-        setWines(prev => [created, ...prev]);
+        commit(prev => [created, ...prev], 'Added');
         setShowAddModal(false);
       };
 
       const handleSaveEdit = (form) => {
         const updated = formToWine(form, editingWine);
-        setWines(prev => prev.map(w => w.id === updated.id ? updated : w));
+        commit(prev => prev.map(w => w.id === updated.id ? updated : w), 'Correction');
         setEditingWine(null);
       };
 
@@ -937,7 +1796,7 @@
           isWishlist: true,
           styleNote: match ? match.styleNote : ''
         });
-        setWines(prev => [created, ...prev]);
+        commit(prev => [created, ...prev], null, { noLog: true });
         setShowWishlistModal(false);
         setWishlistForm({ vintage: String(CURRENT_YEAR - 2), producer: '', varietal: '', name: '' });
       };
@@ -957,7 +1816,7 @@
       // Refresh only touches ESTIMATES — never your own scores, prices, windows or notes.
       const handleRefreshEstimates = () => {
         if (isReadOnly) return;
-        setWines(prev => prev.map(wine => {
+        commit(prev => prev.map(wine => {
           const match = findBenchmark(wine.producer, wine.name);
           const next = { ...wine };
           if (match) {
@@ -970,17 +1829,16 @@
             next.drinkStart = a; next.drinkEnd = b; next.windowEstimated = true;
           }
           return sanitize(next); // recalculates estimated prices; manual prices are kept
-        }));
-        setRefreshSuccess(true);
-        setTimeout(() => setRefreshSuccess(false), 3000);
+        }), null, { noLog: true });
+        setToast({ text: 'Estimates refreshed. Scores, prices and windows you entered were left unchanged.' });
       };
 
       const addTastingNote = () => {
         if (!selectedWineForTasting || !tastingNoteInput.trim()) return;
         const dateStr = new Date().toLocaleDateString('en-AU', { day: 'numeric', month: 'short', year: 'numeric' });
-        setWines(prev => prev.map(w => w.id === selectedWineForTasting.id
+        commit(prev => prev.map(w => w.id === selectedWineForTasting.id
           ? { ...w, notes: w.notes ? `${w.notes} | [${dateStr}]: ${tastingNoteInput.trim()}` : `[${dateStr}]: ${tastingNoteInput.trim()}` }
-          : w));
+          : w), null, { noLog: true });
         setSelectedWineForTasting(null);
         setTastingNoteInput('');
       };
@@ -1002,8 +1860,9 @@
               setCsvError('Could not find a "producer" or "name" column. Download the template to see the expected headers.');
               return;
             }
-            const existingIds = new Set(wines.map(w => w.id));
-            const existingKeys = new Set(wines.map(w => `${w.producer}|${w.name}|${w.vintage}`.toLowerCase()));
+            const current = winesRef.current;
+            const existingIds = new Set(current.map(w => w.id));
+            const existingKeys = new Set(current.map(w => `${w.producer}|${w.name}|${w.vintage}`.toLowerCase()));
             const preview = [];
             for (let r = 1; r < rows.length; r++) {
               const row = rows[r];
@@ -1026,7 +1885,7 @@
       const handleConfirmCsvImport = () => {
         if (csvPreview.length === 0) return;
         takeSnapshot('Before CSV import');
-        setWines(prev => mergeWines(prev, csvPreview.map(p => p.wine)));
+        commit(prev => mergeWines(prev, csvPreview.map(p => p.wine)), 'CSV import');
         setToast({ text: `Imported ${csvPreview.length} row(s). A restore point was saved first.` });
         setShowCsvModal(false);
         setCsvPreview([]);
@@ -1042,6 +1901,13 @@
         downloadFile("cellar_import_7col.csv", csvContent, 'text/csv;charset=utf-8;');
       };
 
+      // --- History ---------------------------------------------------------
+      const updateHistoryEvent = (id, patch) => setHistory(h => h.map(e => e.id === id ? { ...e, ...patch, editedAt: new Date().toISOString() } : e));
+
+      const handleDownloadHistory = (events, label) => {
+        downloadFile(`cellar-history-${label === 'filtered' ? 'filtered-' : ''}${localDate()}.csv`, historyToCsv(events), 'text/csv;charset=utf-8;');
+      };
+
       // --- Backup / export / restore ------------------------------------
       const handleDownloadBackup = () => {
         const payload = {
@@ -1051,11 +1917,12 @@
           exportedAt: new Date().toISOString(),
           count: wines.length,
           bottles: sumBottles(wines.filter(w => !w.isWishlist)),
-          wines
+          wines,
+          history
         };
         downloadFile(`cellar-backup-${localDate()}.json`, JSON.stringify(payload, null, 2), 'application/json');
         saveMeta({ lastBackupAt: new Date().toISOString() });
-        setToast({ text: 'Backup downloaded. Keep it somewhere safe (iCloud Drive, OneDrive, email to yourself).' });
+        setToast({ text: 'Backup downloaded (cellar, wishlist and history). Keep it somewhere safe.' });
       };
 
       const handleExportCsv = () => {
@@ -1064,7 +1931,8 @@
       };
 
       const handleDownloadRaw = () => {
-        downloadFile(`cellar-raw-browser-data-${localDate()}.json`, storage.get(STORAGE_KEY) || '[]', 'application/json');
+        const payload = { wines: storage.get(STORAGE_KEY), history: storage.get(HISTORY_KEY), snapshots: storage.get(SNAPSHOT_KEY) };
+        downloadFile(`cellar-raw-browser-data-${localDate()}.json`, JSON.stringify(payload, null, 2), 'application/json');
       };
 
       const handleRestoreFile = (file) => {
@@ -1085,27 +1953,48 @@
 
       const applyRestore = (mode) => {
         if (!restorePreview) return;
+        const { wines: incoming, history: incomingHistory } = restorePreview;
         takeSnapshot(mode === 'replace' ? 'Before restore (replace)' : 'Before restore (merge)');
-        setWines(prev => mode === 'replace' ? restorePreview.wines : mergeWines(prev, restorePreview.wines));
+        if (mode === 'replace' && incomingHistory) {
+          // The backup carries its own history: restore it exactly, alongside its wines.
+          commit(incoming, null, { noLog: true });
+          replaceHistory(incomingHistory);
+        } else {
+          const prev = winesRef.current;
+          const next = mode === 'replace' ? incoming : mergeWines(prev, incoming);
+          const base = incomingHistory ? unionHistory(history, incomingHistory) : history;
+          commit(next, null, { noLog: true });
+          setHistory(appendEvents(base, diffMovements(prev, next, mode === 'replace' ? 'Restored from backup' : 'Merged from backup')));
+        }
         setSaveBlocked(false);
         setNotice(null);
-        setToast({ text: `Restored ${restorePreview.wines.length} entries (${mode}). A restore point of the previous state was saved.` });
+        setToast({ text: `Restored ${incoming.length} entries (${mode}). A restore point of the previous state was saved.` });
         setRestorePreview(null);
       };
 
       const restoreSnapshot = (snap) => {
         takeSnapshot('Before restoring a restore point');
-        setWines(normalizeList(snap.wines));
+        commit(normalizeList(snap.wines), 'Restore point');
         setSaveBlocked(false);
         setNotice(null);
         setToast({ text: `Restored the ${fmtDateTime(snap.at)} restore point.` });
       };
 
       // --- Shared (read-only) link → your own cellar ----------------------
-      const leaveSharedView = (newWines) => {
+      const leaveSharedView = (mine, newWines, reason) => {
         window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        const base = loadHistoryFor(mine).history;
         lastSavedRef.current = storage.get(STORAGE_KEY);
+        lastSavedHistoryRef.current = storage.get(HISTORY_KEY);
+        readOnlyRef.current = false;
+        const keepIds = new Set(newWines.map(w => w.id));
+        tombstonesRef.current = (() => { const t = readJson(TOMBSTONE_KEY, []); return Array.isArray(t) ? t : []; })();
+        lastSavedTombRef.current = storage.get(TOMBSTONE_KEY);
+        setTombstones(tombstonesRef.current);
+        addTombstones(mine.filter(w => !keepIds.has(w.id)).map(w => w.id));
+        winesRef.current = newWines;
         setWines(newWines);
+        setHistory(reason ? appendEvents(base, diffMovements(mine, newWines, reason)) : base);
         setIsReadOnly(false);
         setSnapshots(readSnapshots());
       };
@@ -1120,13 +2009,13 @@
         const mine = readMyCellar();
         if (mine === null) { setNotice({ type: 'error', text: 'Your own saved cellar could not be read, so nothing was changed. Open Backup & Restore first.' }); return; }
         if (mine.length) setSnapshots(addSnapshot(mine, mode === 'replace' ? 'Before replacing with shared link' : 'Before adding shared link'));
-        leaveSharedView(mode === 'replace' ? wines : mergeWines(mine, wines));
+        leaveSharedView(mine, mode === 'replace' ? wines : mergeWines(mine, wines), 'From shared link');
         setToast({ text: mode === 'replace' ? 'Your cellar was replaced with the shared wines. A restore point was saved.' : 'Shared wines were added to your cellar.' });
       };
 
       const openMyCellar = () => {
         const mine = readMyCellar();
-        leaveSharedView(mine || []);
+        leaveSharedView(mine || [], mine || [], null);
       };
 
       // --- Derived values --------------------------------------------------
@@ -1175,7 +2064,7 @@
       }
 
       const backupAgeDays = daysSince(meta.lastBackupAt);
-      const showBackupReminder = !isReadOnly && !reminderDismissed && wines.length > 0 && backupAgeDays > BACKUP_REMINDER_DAYS;
+      const showBackupReminder = !isReadOnly && !reminderDismissed && wines.length > 0 && backupAgeDays > BACKUP_REMINDER_DAYS && !(syncLinked && syncStatus.state !== 'error');
 
       // --- Render ---------------------------------------------------------
       return (
@@ -1189,14 +2078,20 @@
                 <>
                   <button onClick={() => setShowAddModal(true)} className="bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow">+ Add New Wine</button>
                   <button onClick={() => setShowWishlistModal(true)} className="bg-sky-600 hover:bg-sky-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow">+ Add to Wishlist</button>
-                  <button onClick={() => setShowCsvModal(true)} className="bg-purple-600 hover:bg-purple-500 text-stone-100 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow">📥 Import CSV</button>
-                  <button onClick={handleRefreshEstimates} className="bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow flex items-center gap-1"
-                    title="Updates estimated scores, drink windows and estimated values. Never changes anything you entered yourself.">
-                    🔄 Refresh Estimates
-                    {refreshSuccess && <span className="bg-stone-900 text-amber-400 text-[10px] px-1 py-0.5 rounded">Done!</span>}
-                  </button>
-                  <button onClick={() => setShowBackupModal(true)} className="bg-stone-100 hover:bg-white text-stone-900 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow">💾 Backup & Restore</button>
+                  <ActionsMenu items={[
+                    { icon: '📥', label: 'Import CSV', hint: 'Bulk-add or update wines from a spreadsheet', onClick: () => setShowCsvModal(true) },
+                    { icon: '🔄', label: 'Refresh Estimates', hint: 'Update estimated scores, windows & values only', onClick: handleRefreshEstimates },
+                    { icon: '💾', label: 'Backup & Restore', hint: 'Download a backup, restore, restore points', onClick: () => setShowBackupModal(true) },
+                    { icon: '📜', label: 'Wine History', hint: 'Every bottle in & out — download for Excel', onClick: () => setShowHistoryModal(true) },
+                    { icon: '☁️', label: 'Cloud Sync', hint: syncLinked ? `On — ${syncCfg.repo}` : 'Keep phone & computer in step (GitHub)', onClick: () => setShowSyncModal(true) }
+                  ]} />
                 </>
+              )}
+              {!isReadOnly && syncLinked && (
+                <button onClick={() => setShowSyncModal(true)} title={syncStatus.message || 'Cloud sync status'}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-semibold border transition ${syncStatus.state === 'error' ? 'bg-red-950/70 border-red-700 text-red-200' : syncStatus.state === 'offline' ? 'bg-amber-950/60 border-amber-700/60 text-amber-200' : 'bg-stone-900 border-stone-700 text-sky-300 hover:border-sky-500'}`}>
+                  {syncStatusLabel(syncStatus)}
+                </button>
               )}
               {isReadOnly ? (
                 <div className="bg-amber-900/40 border border-amber-600/50 px-3 py-1.5 rounded-lg text-amber-200 text-xs font-medium">🔒 Shared view (read-only)</div>
@@ -1475,9 +2370,10 @@
           {/* FOOTER STATUS */}
           {!isReadOnly && (
             <div className="text-[10px] text-stone-500 border-t border-stone-800 pt-3 flex flex-wrap gap-x-4 gap-y-1">
-              <span>Saved in this browser only.</span>
+              <span>{syncLinked ? `Saved in this browser and synced to GitHub (${syncCfg.repo}).` : 'Saved in this browser only.'}</span>
               <span>Last backup: {meta.lastBackupAt ? fmtDateTime(meta.lastBackupAt) : 'never'}</span>
               <span>Restore points: {snapshots.length}</span>
+              <span>History entries: {history.length}</span>
               <span>Storage protection: {persistState === 'granted' ? 'on' : persistState === 'checking' ? '…' : 'not granted by browser'}</span>
             </div>
           )}
@@ -1488,7 +2384,24 @@
           )}
           {editingWine && (
             <WineFormModal title={`Edit — ${editingWine.producer} ${editingWine.name}`} initialForm={wineToForm(editingWine)} saveLabel="Save Changes"
+              wineHistory={history.filter(e => e.wineId === editingWine.id)}
               onSave={handleSaveEdit} onClose={() => setEditingWine(null)} />
+          )}
+
+          {/* CLOUD SYNC MODAL */}
+          {showSyncModal && (
+            <SyncModal cfg={syncCfg} status={syncStatus} choice={syncChoice}
+              localSummary={{ entries: wines.length, bottles: totalBottles, history: history.length }}
+              onConnect={connectSync} onChoose={chooseSyncMode} onCancelChoice={() => setSyncChoice(null)}
+              onSyncNow={() => syncNow('manual')} onDisconnect={disconnectSync}
+              onRename={(name) => saveSyncCfg({ ...syncCfgRef.current, deviceName: name })}
+              onClose={() => { setShowSyncModal(false); setSyncChoice(null); }} />
+          )}
+
+          {/* WINE HISTORY MODAL */}
+          {showHistoryModal && (
+            <HistoryModal history={history} canEdit={!isReadOnly} onClose={() => setShowHistoryModal(false)}
+              onUpdateEvent={updateHistoryEvent} onDownload={handleDownloadHistory} />
           )}
 
           {/* WISHLIST MODAL */}
@@ -1608,9 +2521,10 @@
                   <p className="text-stone-400">Your cellar is stored only in this browser. Download a backup regularly and keep it in iCloud Drive, OneDrive or email. Last backup: <span className="text-stone-200">{meta.lastBackupAt ? fmtDateTime(meta.lastBackupAt) : 'never'}</span>.</p>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={handleDownloadBackup} className="bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded">⬇️ Download full backup (.json)</button>
-                    <button onClick={handleExportCsv} className="bg-stone-700 hover:bg-stone-600 text-stone-100 font-semibold px-3 py-1.5 rounded">⬇️ Export spreadsheet (.csv)</button>
+                    <button onClick={handleExportCsv} className="bg-stone-700 hover:bg-stone-600 text-stone-100 font-semibold px-3 py-1.5 rounded">⬇️ Export cellar (.csv)</button>
+                    <button onClick={() => handleDownloadHistory(history, 'all')} className="bg-stone-700 hover:bg-stone-600 text-stone-100 font-semibold px-3 py-1.5 rounded">⬇️ Wine history (.csv)</button>
                   </div>
-                  <p className="text-[10px] text-stone-500">The .json backup is the complete, exact copy (cellar + wishlist + notes). The .csv opens in Excel and can also be re-imported.</p>
+                  <p className="text-[10px] text-stone-500">The .json backup is the complete, exact copy (cellar + wishlist + notes + movement history). The cellar .csv opens in Excel and can also be re-imported.</p>
                 </section>
 
                 <section className="bg-stone-900/80 p-3 rounded-lg border border-stone-700 space-y-2 text-xs">
@@ -1622,7 +2536,7 @@
                   {restorePreview && (
                     <div className="p-2 bg-stone-950 border border-stone-700 rounded space-y-2">
                       <p className="text-stone-200">
-                        <strong>{restorePreview.fileName}</strong>: {restorePreview.wines.length} entries, {sumBottles(restorePreview.wines.filter(w => !w.isWishlist))} bottles
+                        <strong>{restorePreview.fileName}</strong>: {restorePreview.wines.length} entries, {sumBottles(restorePreview.wines.filter(w => !w.isWishlist))} bottles{restorePreview.history ? `, ${restorePreview.history.length} history entries` : ' (no history in this file)'}
                         {restorePreview.exportedAt ? `, saved ${fmtDateTime(restorePreview.exportedAt)}` : ''}.
                       </p>
                       <div className="flex flex-wrap gap-2">
