@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <title>Kiran's Cellar Tracker</title>
+  <title>Robert Street Cellars</title>
   <!-- Install as an app (home screen / dock) -->
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" type="image/png" href="favicon.png">
@@ -12,7 +12,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="Cellar">
+  <meta name="apple-mobile-web-app-title" content="RS Cellars">
   <style>
     html { background: #1c1917; -webkit-tap-highlight-color: transparent; }
     body { overscroll-behavior-y: none; }
@@ -235,7 +235,7 @@ react-dom/cjs/react-dom-client.production.js:
       var root = document.getElementById('root');
       if (root && !root.hasChildNodes()) {
         root.innerHTML = '<div style="max-width:560px;margin:40px auto;padding:20px;font-family:sans-serif;color:#e7e5e4">' +
-          '<h1 style="color:#f59e0b;font-size:20px;font-weight:bold">Cellar Tracker could not load</h1>' +
+          '<h1 style="color:#f59e0b;font-size:20px;font-weight:bold">Robert Street Cellars could not load</h1>' +
           '<p style="font-size:14px;margin-top:8px">The app libraries did not download (check your internet connection) and then reload. ' +
           'Your cellar data is still saved in this browser and has not been touched.</p></div>';
       }
@@ -1087,7 +1087,7 @@ const canonical = (st) => JSON.stringify({
   s: sanitizeSettings(st.settings)
 });
 const buildRemoteDoc = (st, cfg) => ({
-  app: "Kiran's Cellar Tracker",
+  app: "Robert Street Cellars",
   format: "cellar-sync",
   schemaVersion: SCHEMA_VERSION,
   updatedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -3272,7 +3272,7 @@ function WineApp() {
       };
       const phone = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
       if (phone && navigator.share) {
-        navigator.share({ title: kind === "guest" ? "Wine list" : "Kiran's cellar", url: link.url }).then(() => setToast({ text: kind === "guest" ? "Guest list shared." : "Cellar link shared." })).catch((e) => {
+        navigator.share({ title: kind === "guest" ? "Wine list" : "Robert Street Cellars", url: link.url }).then(() => setToast({ text: kind === "guest" ? "Guest list shared." : "Cellar link shared." })).catch((e) => {
           if (!e || e.name !== "AbortError") copy();
         });
       } else copy();
@@ -3377,7 +3377,7 @@ function WineApp() {
   };
   const handleDownloadBackup = () => {
     const payload = {
-      app: "Kiran's Cellar Tracker",
+      app: "Robert Street Cellars",
       format: "cellar-backup",
       schemaVersion: SCHEMA_VERSION,
       exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -3549,7 +3549,7 @@ function WineApp() {
   if (sorter) filteredCellar = [...filteredCellar].sort(sorter);
   const backupAgeDays = daysSince(meta.lastBackupAt);
   const showBackupReminder = !isReadOnly && !reminderDismissed && wines.length > 0 && backupAgeDays > BACKUP_REMINDER_DAYS && !(syncLinked && syncStatus.state !== "error");
-  return /* @__PURE__ */ React.createElement("div", { className: "max-w-7xl mx-auto p-4 md:p-6 space-y-6 pb-24", style: { paddingTop: "max(1rem, env(safe-area-inset-top))", paddingLeft: "max(1rem, env(safe-area-inset-left))", paddingRight: "max(1rem, env(safe-area-inset-right))" } }, /* @__PURE__ */ React.createElement("datalist", { id: "au-region-list" }, AU_REGION_LIST.map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }))), /* @__PURE__ */ React.createElement("datalist", { id: "country-list" }, COUNTRY_OPTIONS.map((c) => /* @__PURE__ */ React.createElement("option", { key: c, value: c }))), /* @__PURE__ */ React.createElement("div", { "data-ui": "masthead", className: "bg-stone-800 border border-stone-700 rounded-xl p-5 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4" }, /* @__PURE__ */ React.createElement("h1", { className: "text-2xl md:text-3xl font-bold text-amber-500 tracking-wide flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "theme-emoji" }, "\u{1F377} "), "Kiran's Cellar Tracker"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, !isReadOnly && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAddModal(true), className: "bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow" }, "+ Add New Wine"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowWishlistModal(true), className: "bg-sky-600 hover:bg-sky-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow" }, "+ Add to Wishlist"), /* @__PURE__ */ React.createElement(ActionsMenu, { items: [
+  return /* @__PURE__ */ React.createElement("div", { className: "max-w-7xl mx-auto p-4 md:p-6 space-y-6 pb-24", style: { paddingTop: "max(1rem, env(safe-area-inset-top))", paddingLeft: "max(1rem, env(safe-area-inset-left))", paddingRight: "max(1rem, env(safe-area-inset-right))" } }, /* @__PURE__ */ React.createElement("datalist", { id: "au-region-list" }, AU_REGION_LIST.map((r) => /* @__PURE__ */ React.createElement("option", { key: r, value: r }))), /* @__PURE__ */ React.createElement("datalist", { id: "country-list" }, COUNTRY_OPTIONS.map((c) => /* @__PURE__ */ React.createElement("option", { key: c, value: c }))), /* @__PURE__ */ React.createElement("div", { "data-ui": "masthead", className: "bg-stone-800 border border-stone-700 rounded-xl p-5 shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4" }, /* @__PURE__ */ React.createElement("h1", { className: "text-2xl md:text-3xl font-bold text-amber-500 tracking-wide flex items-center gap-2" }, /* @__PURE__ */ React.createElement("span", { className: "theme-emoji" }, "\u{1F377} "), "Robert Street Cellars"), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap items-center gap-2" }, !isReadOnly && /* @__PURE__ */ React.createElement(React.Fragment, null, /* @__PURE__ */ React.createElement("button", { onClick: () => setShowAddModal(true), className: "bg-emerald-600 hover:bg-emerald-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow" }, "+ Add New Wine"), /* @__PURE__ */ React.createElement("button", { onClick: () => setShowWishlistModal(true), className: "bg-sky-600 hover:bg-sky-500 text-stone-950 font-bold px-3 py-1.5 rounded-lg text-xs transition shadow" }, "+ Add to Wishlist"), /* @__PURE__ */ React.createElement(ActionsMenu, { items: [
     { icon: "\u{1F4E5}", label: "Import CSV", hint: "Bulk-add or update wines from a spreadsheet", onClick: () => setShowCsvModal(true) },
     { icon: "\u{1F4BE}", label: "Backup & Restore", hint: "Download a backup, restore, restore points", onClick: () => setShowBackupModal(true) },
     { icon: "\u{1F4DC}", label: "Wine History", hint: "Every bottle in & out \u2014 download for Excel", onClick: () => setShowHistoryModal(true) },
@@ -3899,7 +3899,7 @@ function WineApp() {
   ), /* @__PURE__ */ React.createElement("label", { htmlFor: "restoreFileInput", className: "inline-block cursor-pointer bg-sky-700 hover:bg-sky-600 text-stone-100 font-semibold px-3 py-1.5 rounded" }, "\u{1F4C2} Choose backup file (.json)"), restoreError && /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-red-950/80 border border-red-700 text-red-300 rounded" }, "\u26A0\uFE0F ", restoreError), restorePreview && /* @__PURE__ */ React.createElement("div", { className: "p-2 bg-stone-950 border border-stone-700 rounded space-y-2" }, /* @__PURE__ */ React.createElement("p", { className: "text-stone-200" }, /* @__PURE__ */ React.createElement("strong", null, restorePreview.fileName), ": ", restorePreview.wines.length, " entries, ", sumBottles(restorePreview.wines.filter((w) => !w.isWishlist)), " bottles", restorePreview.history ? `, ${restorePreview.history.length} history entries` : " (no history in this file)", restorePreview.exportedAt ? `, saved ${fmtDateTime(restorePreview.exportedAt)}` : "", "."), /* @__PURE__ */ React.createElement("div", { className: "flex flex-wrap gap-2" }, /* @__PURE__ */ React.createElement(ConfirmButton, { onConfirm: () => applyRestore("replace"), className: "bg-rose-700 hover:bg-rose-600 text-stone-100 font-bold px-3 py-1.5 rounded", confirmLabel: "Tap again to replace" }, "Replace current cellar"), /* @__PURE__ */ React.createElement("button", { onClick: () => applyRestore("merge"), className: "bg-stone-700 hover:bg-stone-600 text-stone-100 font-semibold px-3 py-1.5 rounded" }, "Merge into current cellar")), /* @__PURE__ */ React.createElement("p", { className: "text-[10px] text-stone-500" }, "A restore point of your current cellar is saved automatically before either option."))), /* @__PURE__ */ React.createElement("section", { className: "bg-stone-900/80 p-3 rounded-lg border border-stone-700 space-y-2 text-xs" }, /* @__PURE__ */ React.createElement("h4", { className: "font-bold text-amber-400" }, "3. Automatic restore points"), /* @__PURE__ */ React.createElement("p", { className: "text-stone-400" }, "Saved in this browser at the start of each day and before every import or restore (last ", MAX_SNAPSHOTS, " kept). They protect against mistakes, not against the browser data being cleared \u2014 that's what the backup file is for."), snapshots.length === 0 ? /* @__PURE__ */ React.createElement("p", { className: "text-stone-500 italic" }, "None yet.") : /* @__PURE__ */ React.createElement("div", { className: "max-h-48 overflow-y-auto space-y-1" }, [...snapshots].reverse().map((s) => /* @__PURE__ */ React.createElement("div", { key: s.id, className: "flex flex-wrap items-center justify-between gap-2 bg-stone-950 border border-stone-800 rounded p-1.5" }, /* @__PURE__ */ React.createElement("div", null, /* @__PURE__ */ React.createElement("span", { className: "text-stone-200 font-semibold" }, fmtDateTime(s.at)), /* @__PURE__ */ React.createElement("span", { className: "text-stone-500 block text-[10px]" }, s.label, " \xB7 ", s.count, " entries \xB7 ", s.bottles, " bottles")), /* @__PURE__ */ React.createElement("div", { className: "flex gap-1" }, /* @__PURE__ */ React.createElement(
     "button",
     {
-      onClick: () => downloadFile(`cellar-restore-point-${localDate(new Date(s.at))}.json`, JSON.stringify({ app: "Kiran's Cellar Tracker", format: "cellar-backup", schemaVersion: SCHEMA_VERSION, exportedAt: s.at, wines: s.wines }, null, 2), "application/json"),
+      onClick: () => downloadFile(`cellar-restore-point-${localDate(new Date(s.at))}.json`, JSON.stringify({ app: "Robert Street Cellars", format: "cellar-backup", schemaVersion: SCHEMA_VERSION, exportedAt: s.at, wines: s.wines }, null, 2), "application/json"),
       className: "bg-stone-700 hover:bg-stone-600 px-2 py-1 rounded text-[10px]"
     },
     "Download"
@@ -3982,7 +3982,7 @@ function GuestView({ payload }) {
     if (!groups.length || groups[groups.length - 1].name !== g) groups.push({ name: g, wines: [] });
     groups[groups.length - 1].wines.push(w);
   });
-  return /* @__PURE__ */ React.createElement("div", { "data-ui": "guest", className: "max-w-3xl mx-auto p-4 md:p-6 space-y-4", style: { paddingTop: "max(1rem, env(safe-area-inset-top))" } }, /* @__PURE__ */ React.createElement("header", { "data-ui": "masthead", className: "bg-stone-800 border border-stone-700 rounded-xl p-5 text-center space-y-1" }, /* @__PURE__ */ React.createElement("h1", { className: "text-2xl font-bold text-amber-500" }, /* @__PURE__ */ React.createElement("span", { className: "theme-emoji" }, "\u{1F377} "), "Wine list"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-stone-400" }, "Ready to drink from Kiran's cellar", payload.sharedAt ? ` \xB7 ${fmtDay(payload.sharedAt)}` : "", " \xB7 ", payload.wines.length, " wines")), /* @__PURE__ */ React.createElement(
+  return /* @__PURE__ */ React.createElement("div", { "data-ui": "guest", className: "max-w-3xl mx-auto p-4 md:p-6 space-y-4", style: { paddingTop: "max(1rem, env(safe-area-inset-top))" } }, /* @__PURE__ */ React.createElement("header", { "data-ui": "masthead", className: "bg-stone-800 border border-stone-700 rounded-xl p-5 text-center space-y-1" }, /* @__PURE__ */ React.createElement("h1", { className: "text-2xl font-bold text-amber-500" }, /* @__PURE__ */ React.createElement("span", { className: "theme-emoji" }, "\u{1F377} "), "Wine list"), /* @__PURE__ */ React.createElement("p", { className: "text-xs text-stone-400" }, "Ready to drink from Robert Street Cellars", payload.sharedAt ? ` \xB7 ${fmtDay(payload.sharedAt)}` : "", " \xB7 ", payload.wines.length, " wines")), /* @__PURE__ */ React.createElement(
     "input",
     {
       type: "search",
